@@ -62,13 +62,13 @@ npm run desktop
 
 ```text
 release/
-├── SelfEvolvingAgent-<version>-x64-setup.exe
-└── SelfEvolvingAgent-<version>-x64-portable.exe
+├── SelfEvolvingAgent-<version>-setup-x64.exe
+└── SelfEvolvingAgent-<version>-portable-x64.exe
 ```
 
 ### 用户安装步骤
 
-1. 下载 `SelfEvolvingAgent-<version>-x64-setup.exe`。
+1. 下载 `SelfEvolvingAgent-<version>-setup-x64.exe`。
 2. Windows 可能提示未知发布者，选择“更多信息 → 仍要运行”。
 3. 选择安装目录。
 4. 安装完成后从开始菜单或桌面启动。
@@ -76,7 +76,7 @@ release/
 
 ### 免安装使用步骤
 
-1. 下载 `SelfEvolvingAgent-<version>-x64-portable.exe`。
+1. 下载 `SelfEvolvingAgent-<version>-portable-x64.exe`。
 2. 放到任意目录。
 3. 双击运行。
 
