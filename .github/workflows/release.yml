@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build web assets
+        run: npm run build
+
+      - name: Build Windows desktop package
+        run: npm run desktop
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Self-Evolving-Agent-Windows-x64
+          path: |
+            release/*.exe
+            release/*.yml
+          if-no-files-found: error
+
+      - name: Attach files to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          fail_on_unmatched_files: true
