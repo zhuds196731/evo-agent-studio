@@ -1,4 +1,4 @@
-name: Release
+﻿name: Release
 
 on:
   workflow_dispatch:
@@ -34,7 +34,7 @@ jobs:
         run: npm run build
 
       - name: Build Windows desktop package
-        run: npm run desktop
+        run: npm run desktop -- --publish never
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
 
@@ -53,3 +53,4 @@ jobs:
         with:
           files: release/*.exe
           fail_on_unmatched_files: true
+
