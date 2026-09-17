@@ -84,8 +84,8 @@ npm run desktop
 
 构建完成后，可在 `release/` 目录获得：
 
-- `SelfEvolvingAgent-<version>-x64-setup.exe`：Windows 安装版
-- `SelfEvolvingAgent-<version>-x64-portable.exe`：免安装版
+- `SelfEvolvingAgent-<version>-setup-x64.exe`：Windows 安装版
+- `SelfEvolvingAgent-<version>-portable-x64.exe`：免安装版
 
 详细说明见 [docs/PACKAGING.md](docs/PACKAGING.md)。
 
