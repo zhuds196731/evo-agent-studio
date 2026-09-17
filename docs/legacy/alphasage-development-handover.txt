@@ -1,0 +1,418 @@
+﻿AlphaSage 开发交接文档
+版本：v1.0 · 2026-09-15
+用途：交付给另一智能体团队进行独立开发/测试，与现有团队结果对比
+当前进度：18/41 插件 done，行业层 10/10 收官，A 延期批次已清完
+交接点：C 阶段（数据采集层 + 综合决策层）开工前
+
+第一部分：项目定义
+1.1 项目目标
+构建一套多智能体投资分析系统，把投资决策拆解为可独立计算、可独立验证的原子判断。
+
+核心设计哲学：
+
+自上而下漏斗：宏观（有没有水）→ 行业（钱往哪流）→ 公司（买哪只）→ 技术（何时买）→ 情绪（氛围）
+
+纯代码计算：所有金融算术用 pandas/numpy 完成，LLM 只做逻辑推演
+
+多智能体对抗：每个判断由独立角色产出，compliance 有一票否决权
+
+留痕优先：所有决策保留历史沿革，不覆盖、不删除
+
+1.2 交付形态
+41 个业务插件（当前 18 个 done）：每个插件是一个独立的 Python 包，输入 DataFrame，输出结构化 AgentVerdict
+
+契约体系：AGENTS.md + plugin-manifest.yaml + data-columns.yaml，三者构成唯一事实来源
+
+门禁体系：check_contract.mjs（结构契约）+ gate.ps1（一键跑全部门禁）
+
+采集层（未完成）：从申万/东财拉真实数据，喂给插件
+
+1.3 技术栈
+项	值
+Python	3.11+
+核心库	pandas / numpy / pydantic v2
+测试	pytest（每插件恰好 3 个用例）
+契约校验	Node.js（check_contract.mjs）
+门禁	PowerShell 5.1（gate.ps1，ASCII-only）
+数据源	申万宏源研究端点（主）+ 东财 clist/get（资金流聚合）
+禁用	ta-lib（用 pandas ewm 复现）、任何 LLM 参与算术
+第二部分：核心设计原则（不可违背）
+2.1 三条防幻觉铁律（R1/R2/R3）
+编号	内容	机械判据
+R1	所有金融计算纯代码，严禁 LLM 参与算术	AST 扫描禁用符号（socket/requests/akshare/openai 等）0 命中
+R2	数据缺失时返回固定状态 INSUFFICIENT_DATA，value=None，不得编造数值	所有不足路径返回 {samples, reason} 两键，message 精确为「数据不足，暂不决策」
+R3	每插件恰好 3 个 pytest 用例，不得引入未声明依赖	AST 计数 test_ 函数 == 3；依赖 ⊆ pyproject
+compliance 对这三条有一票否决权。
+
+2.2 多智能体分工（五角色流水线）
+角色	职责	模型（建议）	产出
+pm	拆解需求为任务清单，识别规格矛盾	flash · high	-20-tasks.md
+architect	钉死算法、常量、守卫链、models.py	pro · high	-30-architect-brief.md + models.py
+coder	实现插件 + 测试 + smoke	pro · high	plugin.py / tests/ / tools/smoke_*.py
+tester	独立复算、对抗性实测	flash · high	-50-test-report.md
+compliance	对抗式审查、盲区发现、一票否决	flash · high	-60-compliance-report.md
+铁律：主代理只做协调、裁决上报、收尾置位，不得代做任何角色的产出。
+
+2.3 留痕纪律
+所有被取代的旧文本保留原行，就地追加取代标注
+
+不删除历史，不覆盖原句
+
+废止理由必须留下，不得整段删光
+
+台账记录所有并发覆盖事件
+
+2.4 引用纪律（§8）
+引用一律「章节号 + 内容片段」，不得只写裸行号
+
+确需行号时必须标注 @<commit hash>（如 L352@f1034db）
+
+审查报告引用行号时必须同时给出内容片段
+
+存量不合规旧引用不追溯重写，但不得再被复制
+
+第三部分：系统架构
+3.1 四层数据结构
+层	中文	频率	列数	时间键	消费者
+ohlcv	行情	日频	5	行序（隐式，按时间升序）	技术面/量价插件 + I1（bench_close）
+macro	宏观	月频/日频	10	m_date（发布日，非报告期）	M1–M7（未开工）
+industry	行业	日频	13	ind_date	I1–I11
+fundamental	基本面	季频（估值日频）	13	f_trade_date / f_announce_date	F1–F7（未开工）
+列数唯一口径：41 = 5 + 10 + 13 + 13（键列计入，删除的 13 列在 _deleted 段留档）。
+
+3.2 插件清单（41 条）
+原始层（17 条，8 done / 9 todo）：
+
+技术面：ma_trend ✅ / macd_signal ✅ / rsi_extreme ✅ / kdj_stochastic ✅ / bollinger_position ✅ / atr_volatility ✅ / adx_trend_strength ⬜ / cci_commodity ⬜ / williams_r ⬜ / roc_momentum ⬜ / zscore_anomaly ⬜ / support_resistance ⬜ / market_regime ⬜ / risk_position_size ⬜
+
+量价：volume_surge ✅ / obv_divergence ✅ / mfi_flow ⬜
+
+阶段 1 行业层（10 条，全 done）：
+industry_relative_strength ✅ / industry_momentum_rank ✅ / industry_capital_flow ✅ / industry_crowding ✅ / industry_volatility_state ✅ / industry_trend_consistency ✅ / industry_volume_price_divergence ✅ / industry_drawdown_state ✅ / industry_valuation_percentile ✅ / industry_capital_structure ✅
+
+阶段 2 宏观层（7 条，全 todo）：
+macro_cpi_trend / macro_ppi_trend / macro_ppi_cpi_scissors / macro_pmi_position / macro_m1_m2_scissors / macro_credit_impulse / macro_yield_curve_slope
+
+阶段 3 基本面层（7 条，全 todo）：
+fundamental_valuation_percentile / fundamental_roe_trend / fundamental_earnings_growth / fundamental_gross_margin_trend / fundamental_quality_score / fundamental_leverage_risk / fundamental_cashflow_quality
+
+3.3 插件标准结构
+text
+alphasage/agents/<agent_id>/
+├── __init__.py
+├── models.py          ← Pydantic v2 模型（AgentVerdict / DecisionStatus / <Name>Input）
+├── plugin.py          ← 业务逻辑（纯代码计算）
+└── tests/
+├── __init__.py
+└── test_<agent_id>.py   ← 恰好 3 个 pytest 用例
+tools/smoke_<agent_id>.py    ← 数值正确性独立核算（解析解对照）
+3.4 形状约定（§3.2 / §4.1）
+形状	含义	消费者
+A	单层单标的	大多数技术面插件
+B	多层多标的（每列带 layer）	行业层跨层插件
+C	同一 DataFrame 内并排两个标的序列（如 ind_close + bench_close）	I1
+消费非 OHLCV 层的插件必须声明 requires_schema: 2（形状 B）。
+
+第四部分：契约体系详解
+4.1 AGENTS.md（唯一契约来源）
+结构：
+
+§0 防幻觉铁律（R1/R2/R3）
+
+§1 目录布局
+
+§3 输入形状契约
+
+§4 跨层与形状 C
+
+§5 数据引用纪律、Unicode 处置、evidence 键数
+
+§6 并发写入纪律
+
+§7 DoD（完成定义）+ done_at
+
+§8 文档引用纪律
+
+§9 盲区清单（NB-1 ~ NB-20）
+
+§9.1 已知行为登记
+
+硬约束摘要：
+
+§3.1 日频不低于最长窗口 2 倍（可被逐参数窗口守卫替代）
+
+§5.2 日频行情层新鲜度因子恒等于 1.0
+
+§5.3 evidence 四键只对 status == OK 生效；INSUFFICIENT_DATA 恒为 {samples, reason}
+
+§5.4 多契约列 ← 同一上游列时，用 source_field 区分
+
+§6.1 同一交付路径同时只允许一个写入者
+
+§7.1 done_at 格式：ISO 8601 带偏移 + @ + ≥7 位 commit hash
+
+§9 硬约束：NB-* 既不是否决理由，也不是实现缺陷
+
+4.2 plugin-manifest.yaml（41 条工单）
+每条包含：id / category / decision / requires / min_samples / min_samples_basis / status / owner_role / done_at（如 done）。
+
+状态机：todo → doing → done（由主代理按 §7 置位）
+
+4.3 data-columns.yaml（列定义）
+每条列包含 9 必填键 + source_field / status。
+
+特殊约定：
+
+键列计入列数（41 = 5+10+13+13）
+
+删除的列在 _deleted 段留档，不计入
+
+source_field 记上游物理名（如 closeindex），不是唯一键
+
+列名匹配先做 NFC 规范化，保留原串审计
+
+NFKC 禁止使用（会折叠 Ⅱ → II，破坏 R9 判据）
+
+4.4 门禁体系
+工具	作用	命令
+check_contract.mjs	结构契约 + manifest 全表 V1–V7	node tools/check_contract.mjs
+gate.ps1	一键跑全部（契约 + pytest + 所有 smoke）	powershell -File tools/gate.ps1
+gate.ps1 内部设 PYTHONIOENCODING=utf-8（否则 GBK 代码页下 ⇒ 会崩）。
+
+第五部分：已知坑与静默错误清单
+5.1 静默错误家族（不报错，直接污染数据）
+编号	类型	示例
+K12	同码不同义	f84 在 clist 是小单净额，在 stock/get 是总股本
+K16	无源	换手率历史、行业估值分位
+K23	路径封锁	东财 kline 路径整体不可用
+K27	形近字符	全角 （亿元）（U+FF08）vs 半角 (亿元)（U+0028）
+C-08	全列互换	符号翻转，静默改变结论
+NB-1 ~ NB-20	各插件特有盲区	见 AGENTS.md §9
+5.2 环境坑
+坑	表现	应对
+GBK 代码页	⇒ 抛 UnicodeEncodeError	gate.ps1 内部设 PYTHONIOENCODING=utf-8
+core.autocrlf	字节级判据失效	必须为 false
+maintenance.auto	git 后台维护被沙箱拒	必须为 false
+管道捕获	2>&1 | 被沙箱拒	直接运行直读
+%TEMP% 子目录	不可写	用 -p no:cacheprovider
+PowerShell 5.1	无 BOM UTF-8 按 GBK 解码	.ps1 存为 ASCII-only
+git.exe 被拒	某些沙箱拒绝	用 Node child_process 调用
+5.3 合规边界
+用途：个人研究/学习，不商用。产品化必须换商业数据源
+
+来源：申万宏源研究 + 东财 clist/get（资金流聚合）
+
+频率：最小间隔 1 秒，单次回溯 ≤ 250 日
+
+快照：仅本地保留，contracts/sources/raw/ 不进 Git
+
+预案：上游故障 → 暂停采集，等恢复。不切源、不自建源
+
+同花顺：已彻底移除，不得重新提出（服务协议第 16 条禁止第三方工具接入）
+
+adata：降级为开发期探测工具，不进生产采集
+
+第六部分：开发流程规范
+6.1 标准工单流程
+text
+1. 主代理读 manifest，确认下一个 todo 插件
+2. 派遣 pm → 出任务清单（-20-tasks.md）
+3. 派遣 architect → 出 brief + models.py（-30-architect-brief.md）
+4. 派遣 coder → 出 plugin.py + tests + smoke（-40-coder-report.md）
+5. 派遣 tester → 独立复核（-50-test-report.md）
+6. 派遣 compliance → 对抗式审查（-60-compliance-report.md）
+- 若否决：退回 coder 返工（-41/-51/-61）
+- 上限 3 次否决
+7. 主代理收尾：manifest 置 done + done_at，README 同步，git commit
+6.2 开工前必做
+检查 requires 是否含层时间键（§3.2 规则 3）
+
+检查是否有规格矛盾，有则停下问用户
+
+确认 C-08 反例、YAML 独立解析、§8 引用格式三项要求
+
+6.3 收尾必做
+跑完整 gate.ps1，确认全 PASS
+
+更新 manifest 的 status 和 done_at（done_at 的 hash 必须指向承载该状态的 commit）
+
+更新 README 进度表
+
+git commit（message 用 UTF-8 文件传入）
+
+6.4 交接给新团队的特别要求
+不得修改契约（AGENTS.md / manifest / data-columns.yaml）除非先停下问用户
+
+不得跳过 compliance 审查
+
+不得代做子代理的活
+
+若遇规格矛盾，先停下报告，不要硬执行
+
+每次变更必须一次性覆盖，不得分拆
+
+第七部分：当前进度与断点
+7.1 全局进度
+层	已完成	待办	小计
+技术面	6	8	14
+量价	2	1	3
+行业	10	0	10
+宏观	0	7	7
+基本面	0	7	7
+合计	18	23	41
+7.2 最后交付状态
+HEAD = f477458（收尾报告）
+
+A 延期批次已清完（24 文件，+3990/−84）
+
+gate.ps1：ALL GATES PASSED，261 项检查 0 失败
+
+pytest：80 passed
+
+compliance：通过（0 BLOCKER / 0 HIGH / 4 MEDIUM / 9 LOW）
+
+7.3 未处理项
+C 阶段（数据采集层 + 综合决策层）—— 未开始
+
+B 阶段（宏观 + 基本面）—— 未开始
+
+C-2 采集层接线（ind_main_net_inflow 日频历史）
+
+4 MEDIUM / 9 LOW 非阻塞项
+
+第八部分：下一步（C 阶段规划要求）
+8.1 C 阶段目标
+让系统第一次用真实数据跑通一次完整决策。
+
+8.2 必须交付
+数据采集层：从申万/东财拉数，清洗、单位换算、时点对齐、落库
+
+综合决策层：汇总 3-5 个核心插件输出，加权打分，输出决策
+
+端到端链路：输入股票/行业代码 → 输出方向、仓位、置信度、理由链
+
+最小回测：用真实历史数据验证
+
+8.3 验收标准
+采集层能拉 31 个申万一级行业的完整历史数据
+
+决策层能输出结构化决策（方向 + 仓位 + 置信度 + 理由链）
+
+端到端跑通一次，输出可解释的结果
+
+回测至少覆盖一段历史，给出胜率/回撤
+
+8.4 实施顺序建议
+先做数据采集层（无数据，决策层无从谈起）
+
+再做综合决策层（选 3-5 个核心插件，不要全上）
+
+最后做端到端链路 + 回测
+
+第九部分：交接清单（给新团队）
+9.1 必须读取的文件
+文件	作用
+AGENTS.md	唯一契约来源，动工前必读
+contracts/plugin-manifest.yaml	41 条工单与状态
+contracts/data-columns.yaml	列定义唯一事实来源
+README.md	项目结构、数据层、取数来源、环境约定
+contracts/tasks/deferred-batch-a-70-closeout-report.md	最后交付状态
+contracts/plans/three-layer-expansion.md	三层扩展规划
+contracts/plans/phase-1-launch-conditions-sw31.md	阶段 1 启动条件
+9.2 必须遵守的硬约束
+R1/R2/R3 三条铁律
+
+§8 引用纪律
+
+§6.1 并发写入纪律
+
+留痕优先（不覆盖、不删除）
+
+不做「静默错误」（不报错但污染数据）
+
+9.3 必须复现的验证
+node tools/check_contract.mjs → 违规 0
+
+powershell -File tools/gate.ps1 → ALL GATES PASSED
+
+pytest -q → 全部通过
+
+PyYAML 独立解析 manifest + data-columns → 可解析
+
+9.4 必须产出的证据
+每插件：-20 到 -60 报告链
+
+每插件：tools/smoke_<agent_id>.py（数值独立核算）
+
+每插件：tests/test_<agent_id>.py（恰好 3 用例）
+
+门禁结果（非转述，亲自实跑）
+
+C-08 反例执行结果
+
+YAML 独立解析结果
+
+第十部分：对比评估建议
+10.1 两个团队结果的对比维度
+维度	现有团队（DSH/DeepSeek）	新团队（Sol/其他）
+交付速度	每插件约 1-2 轮对话	待评估
+质量	18/41 done，compliance 真实否决多次	待评估
+盲区发现	NB-1 ~ NB-20，C-08 家族完整	待评估
+契约一致性	高（§8 引用纪律、留痕纪律）	待评估
+成本	DeepSeek 定价	Sol 定价更高
+可审计性	每步有字节级证据	待评估
+10.2 对比方法建议
+同一插件：让两个团队分别实现同一个插件（如 I5 或 M1），对比交付质量
+
+同一盲区：让两个团队分别做 C-08 反例，对比发现能力
+
+同一契约：让两个团队分别解读 AGENTS.md，对比理解偏差
+
+端到端：让两个团队分别跑一次完整决策，对比输出质量
+
+10.3 对比时的注意事项
+不要只比速度，质量、盲区发现、契约一致性更重要
+
+不要只比最终代码，报告链、证据链、留痕纪律同样重要
+
+不要忽略成本，Sol 的定价是 DeepSeek 的 20 倍以上
+
+保留两套结果独立，不要互相参考，否则失去对比意义
+
+附录：关键文件路径清单
+text
+F:\01DSH\alphasage\
+├── AGENTS.md                                  ← 唯一契约来源
+├── README.md                                  ← 项目说明
+├── contracts/
+│   ├── plugin-manifest.yaml                   ← 41 条工单
+│   ├── data-columns.yaml                      ← 列定义
+│   ├── plans/
+│   │   ├── three-layer-expansion.md           ← 三层扩展规划
+│   │   ├── phase-0-acceptance-checklist.md    ← 阶段 0 验收清单
+│   │   └── phase-1-launch-conditions-sw31.md  ← 阶段 1 启动条件
+│   ├── sources/
+│   │   ├── akshare-metadata-1.18.94.json      ← 元数据快照
+│   │   └── raw/                               ← 实拉原始数据（不进 Git）
+│   └── tasks/
+│       ├── deferred-batch-a-70-closeout-report.md  ← 最后交付状态
+│       ├── industry_*-{20,30,40,50,60}*.md    ← 行业层报告链
+│       └── ...
+├── tools/
+│   ├── check_contract.mjs                     ← 结构闸门
+│   ├── gate.ps1                               ← 一键门禁
+│   ├── pull_sw_industry.py                    ← 申万实拉
+│   ├── validate_data_columns.py               ← 列定义校验
+│   ├── report_column_unicode.py               ← NFC/形近检测
+│   └── smoke_*.py                             ← 各插件数值核算
+└── alphasage/
+├── collector/                             ← 采集层最小开工集
+│   ├── http.py                            ← host 回退
+│   ├── columns.py                         ← 列名规范化
+│   └── sources.py                         ← 源登记
+└── agents/<agent_id>/                     ← 各插件
+文档结束
+
+交接要求：新团队必须先读第九部分「必须读取的文件」，确认理解后再开工。任何契约修改、规格矛盾、方向选择，必须先停下报告，不得自行决定。
+
+对比要求：两个团队必须独立工作，不互相参考，保留各自完整的报告链和证据链。

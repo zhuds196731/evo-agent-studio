@@ -1,0 +1,30 @@
+# Node / Vite
+node_modules/
+dist/
+release/
+*.local
+
+# Desktop build output
+dist_electron/
+builder-effective-config.yaml
+
+# Mobile generated native projects
+android/
+ios/
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Logs and diagnostics
+npm-debug.log*
+yarn-error.log*
+*.log
+coverage/
+
+# Local working copies, caches and tool memories
+work/
+.codebuddy/
+.cache/
+.vite/

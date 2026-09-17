@@ -1,0 +1,60 @@
+{
+  "name": "evo-agent-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Self-Evolving Agent · 多模态智能体协同平台：岗位数字人、多场景对话、先哲思想咨询、知识库、记事本、投资分析",
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.evo.agentstudio",
+    "productName": "Self-Evolving Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "SelfEvolvingAgent-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4174",
+    "typecheck": "tsc --noEmit",
+    "electron:dev": "electron .",
+    "desktop": "vite build && electron-builder --win --x64",
+    "mobile:init": "npx cap add android && npx cap add ios",
+    "mobile:sync": "vite build && npx cap sync"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
