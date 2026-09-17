@@ -17,14 +17,28 @@
     ],
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "SelfEvolvingAgent-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "SelfEvolvingAgent-0.1.0-setup-x64.exe"
+    },
+    "portable": {
+      "artifactName": "SelfEvolvingAgent-0.1.0-portable-x64.exe"
     }
   },
   "scripts": {
@@ -56,5 +70,6 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
-  }
+  },
+  "author": "Self-Evolving Agent contributors"
 }
