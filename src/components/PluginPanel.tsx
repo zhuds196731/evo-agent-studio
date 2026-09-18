@@ -14,6 +14,20 @@ interface Props {
   onToast: (msg: string) => void;
 }
 
+const SPECIAL_CATEGORY = '特殊技能';
+
+function normalizeCategories(values: unknown): string[] {
+  const saved = Array.isArray(values) ? values.map(String).map((v) => v.trim()).filter(Boolean) : [];
+  return [...new Set([SPECIAL_CATEGORY, ...saved])];
+}
+
+function pluginCategory(plugin?: Plugin | null): string {
+  if (plugin?.category?.trim()) return plugin.category.trim();
+  if (plugin?.source === 'skillhub') return 'SkillHub';
+  if (plugin?.builtin) return '内置插件';
+  return '自定义';
+}
+
 function normalizeImportedPlugin(raw: unknown, index: number): Plugin {
   if (!raw || typeof raw !== 'object') throw new Error(`第 ${index + 1} 个插件不是对象`);
   const value = raw as Partial<Plugin>;
@@ -42,16 +56,18 @@ function normalizeImportedPlugin(raw: unknown, index: number): Plugin {
       : [{ input: { text: '测试任务' }, expected: '' }],
     builtin: false,
     source: 'manual',
+    category: value.category ? String(value.category).trim() : '自定义',
     createdAt: now,
     updatedAt: now,
   };
 }
 
-function downloadPlugins(filename: string, plugins: Plugin[]) {
+function downloadPlugins(filename: string, plugins: Plugin[], pluginCategories?: string[]) {
   const payload = {
     format: 'evo-agent-plugin-pack',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
+    pluginCategories: pluginCategories?.length ? normalizeCategories(pluginCategories) : [SPECIAL_CATEGORY],
     plugins,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -66,13 +82,64 @@ function downloadPlugins(filename: string, plugins: Plugin[]) {
 export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
   const [editing, setEditing] = useState<Plugin | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | 'ALL'>(SPECIAL_CATEGORY);
+  const [newCategory, setNewCategory] = useState('');
   const importRef = useRef<HTMLInputElement>(null);
   const plugins = state.plugins ?? [];
+
+  const stateCategories = normalizeCategories(state.pluginCategories);
+  const visibleCategories = [...new Set([
+    ...stateCategories,
+    ...plugins.map(pluginCategory),
+  ])].filter(Boolean);
+  const filteredPlugins = activeCategory === 'ALL'
+    ? plugins
+    : plugins.filter((plugin) => pluginCategory(plugin) === activeCategory);
+  const categoryCount = (category: string) => plugins.filter((plugin) => pluginCategory(plugin) === category).length;
 
   const updatePlugin = (updated: Plugin) => {
     onUpdateState({
       plugins: plugins.map((p) => (p.id === updated.id ? updated : p)),
     });
+  };
+
+  const movePlugin = (plugin: Plugin, category: string) => {
+    if (!category || category === pluginCategory(plugin)) return;
+    updatePlugin({
+      ...plugin,
+      category,
+      updatedAt: new Date().toISOString(),
+    });
+    onUpdateState({ pluginCategories: [...new Set([...visibleCategories, category])] });
+    onToast(`插件「${plugin.name}」已移动到「${category}」，功能保持不变`);
+  };
+
+  const createCategory = () => {
+    const category = newCategory.trim();
+    if (!category) return;
+    if (visibleCategories.includes(category)) {
+      onToast(`目录「${category}」已存在`);
+      return;
+    }
+    onUpdateState({ pluginCategories: [...new Set([...stateCategories, category])] });
+    setNewCategory('');
+    setActiveCategory(category);
+    onToast(`已创建插件目录「${category}」`);
+  };
+
+  const removeActiveCategory = () => {
+    if (activeCategory === SPECIAL_CATEGORY) {
+      onToast('「特殊技能」是内置首栏，不能删除');
+      return;
+    }
+    if (activeCategory === 'ALL') return;
+    if (plugins.some((plugin) => pluginCategory(plugin) === activeCategory)) {
+      onToast('目录中还有插件，请先移动插件后再删除目录');
+      return;
+    }
+    onUpdateState({ pluginCategories: stateCategories.filter((category) => category !== activeCategory) });
+    onToast(`已删除空目录「${activeCategory}」`);
+    setActiveCategory(SPECIAL_CATEGORY);
   };
 
   const handleTest = async (plugin: Plugin) => {
@@ -153,7 +220,11 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
         if (index >= 0) next[index] = plugin;
         else next.push(plugin);
       }
-      onUpdateState({ plugins: next });
+      const importedCategories = Array.isArray(parsed?.pluginCategories) ? parsed.pluginCategories : [];
+      onUpdateState({
+        plugins: next,
+        pluginCategories: normalizeCategories([...stateCategories, ...importedCategories]),
+      });
       onToast(`已导入 ${imported.length} 个插件（默认草稿，测试后可升级）`);
     } catch (e) {
       onToast(`插件导入失败：${(e as Error).message}`);
@@ -197,7 +268,14 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
           <span className="ml-2 text-[11px] font-normal text-royal-300">SkillHub {skillhubCount}</span>
         </h2>
         <div className="flex flex-wrap gap-1.5">
-          <button className="btn-ghost text-xs" onClick={() => downloadPlugins(`evo-plugins-${new Date().toISOString().slice(0, 10)}.json`, plugins)}>
+          <button
+            className="btn-ghost text-xs"
+            onClick={() => downloadPlugins(
+              `evo-plugins-${new Date().toISOString().slice(0, 10)}.json`,
+              plugins,
+              stateCategories,
+            )}
+          >
             导出全部
           </button>
           <button className="btn-ghost text-xs" onClick={() => importRef.current?.click()}>
@@ -209,8 +287,58 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
         </div>
       </div>
 
+      <div className="mb-3 rounded-xl border border-white/5 bg-ink-800/40 p-2">
+        <div className="flex flex-wrap gap-1.5">
+          {visibleCategories.map((category) => (
+            <button
+              key={category}
+              className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+                activeCategory === category
+                  ? 'border-jade-500/40 bg-jade-500/15 text-jade-300'
+                  : 'border-white/5 bg-ink-700/50 text-slate-400 hover:text-slate-200'
+              }`}
+              onClick={() => setActiveCategory(category)}
+            >
+              {category}
+              <span className="ml-1 opacity-70">{categoryCount(category)}</span>
+            </button>
+          ))}
+          <button
+            className={`rounded-lg border px-2.5 py-1 text-xs transition ${
+              activeCategory === 'ALL'
+                ? 'border-royal-500/40 bg-royal-500/15 text-royal-300'
+                : 'border-white/5 bg-ink-700/50 text-slate-400 hover:text-slate-200'
+            }`}
+            onClick={() => setActiveCategory('ALL')}
+          >
+            全部
+            <span className="ml-1 opacity-70">{plugins.length}</span>
+          </button>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <input
+            className="input h-8 min-w-40 flex-1 text-xs"
+            placeholder="新建插件目录，例如：舆情 / 数据 / 研究"
+            value={newCategory}
+            onChange={(event) => setNewCategory(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && createCategory()}
+          />
+          <button className="btn-ghost h-8 text-xs" onClick={createCategory}>
+            新建目录
+          </button>
+          <button
+            className="btn-ghost h-8 text-xs text-rose-300"
+            onClick={removeActiveCategory}
+            disabled={activeCategory === SPECIAL_CATEGORY || activeCategory === 'ALL'}
+          >
+            删除当前空目录
+          </button>
+        </div>
+      </div>
+
       <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-        ACTIVE 插件会参与所有对话场景的能力匹配。SkillHub 技能已内置并加载；手动导入的插件默认为草稿，需先测试再升级。
+        ACTIVE 插件参与所有对话场景的能力匹配；移动目录只调整归属，不改变状态、代码、测试记录或调用能力。
       </p>
 
       <input
@@ -224,6 +352,7 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
       {showCreate && (
         <PluginEditor
           plugin={null}
+          categories={visibleCategories}
           onSave={handleSave}
           onCancel={() => setShowCreate(false)}
         />
@@ -232,19 +361,21 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
       {editing && (
         <PluginEditor
           plugin={editing}
+          categories={visibleCategories}
           onSave={handleSave}
           onCancel={() => setEditing(null)}
         />
       )}
 
       <div className="space-y-2">
-        {plugins.map((plugin) => (
+        {filteredPlugins.map((plugin) => (
           <div key={plugin.id} className="rounded-xl border border-white/5 bg-ink-700/40 p-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-200">{plugin.name}</span>
                   <span className={`text-[10px] ${statusColor[plugin.status]}`}>● {statusLabel[plugin.status]}</span>
+                  <span className="chip text-[10px] text-slate-400">{pluginCategory(plugin)}</span>
                   <span className="chip text-[10px] text-slate-400">{sourceLabel(plugin)}</span>
                 </div>
                 <div className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{plugin.description}</div>
@@ -278,7 +409,7 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
                 )}
                 <button
                   className="btn-ghost text-[11px]"
-                  onClick={() => downloadPlugins(`${plugin.id}.json`, [plugin])}
+                  onClick={() => downloadPlugins(`${plugin.id}.json`, [plugin], visibleCategories)}
                 >
                   导出
                 </button>
@@ -289,6 +420,20 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
                 )}
               </div>
             </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <label className="text-[10px] text-slate-500">移动到</label>
+              <select
+                className="input h-7 max-w-52 text-[11px]"
+                value={pluginCategory(plugin)}
+                onChange={(event) => movePlugin(plugin, event.target.value)}
+              >
+                {[...new Set([...visibleCategories, pluginCategory(plugin)])].map((category) => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+            </div>
+
             {plugin.lastTestResult && (
               <div className="mt-2 rounded-lg border border-white/5 bg-ink-800/40 p-2 text-[10px] text-slate-400">
                 <span className={plugin.lastTestResult.ok ? 'text-jade-400' : 'text-rose-400'}>
@@ -304,8 +449,10 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
             )}
           </div>
         ))}
-        {plugins.length === 0 && (
-          <div className="py-8 text-center text-xs text-slate-500">暂无插件，点击「新建插件」创建。</div>
+        {filteredPlugins.length === 0 && (
+          <div className="py-8 text-center text-xs text-slate-500">
+            当前目录暂无插件。可以从其他目录移动插件，或点击「新建插件」。
+          </div>
         )}
       </div>
     </div>
@@ -314,16 +461,19 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
 
 function PluginEditor({
   plugin,
+  categories,
   onSave,
   onCancel,
 }: {
   plugin: Plugin | null;
+  categories: string[];
   onSave: (plugin: Plugin) => void;
   onCancel: () => void;
 }) {
   const [id, setId] = useState(plugin?.id ?? '');
   const [name, setName] = useState(plugin?.name ?? '');
   const [description, setDescription] = useState(plugin?.description ?? '');
+  const [category, setCategory] = useState(pluginCategory(plugin));
   const [capabilities, setCapabilities] = useState((plugin?.capabilities ?? []).join(', '));
   const [code, setCode] = useState(
     plugin?.code ??
@@ -349,6 +499,7 @@ function PluginEditor({
       lastTestResult: plugin?.lastTestResult,
       builtin: plugin?.builtin ?? false,
       source: plugin?.source ?? 'manual',
+      category,
       createdAt: plugin?.createdAt ?? now,
       updatedAt: now,
     };
@@ -368,6 +519,22 @@ function PluginEditor({
         <div>
           <label className="label">插件名称</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <label className="label">插件目录</label>
+          <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+            {[...new Set([...categories, category])].map((item) => (
+              <option key={item} value={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">插件来源</label>
+          <input
+            className="input"
+            value={plugin?.source === 'skillhub' ? 'SkillHub' : plugin?.builtin ? '内置' : '自定义'}
+            disabled
+          />
         </div>
         <div className="md:col-span-2">
           <label className="label">描述</label>

@@ -203,11 +203,14 @@ async function autoInvokePlugins(
   const keywords = userInput.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
   if (!keywords.length) return [];
 
+  const haystack = userInput.toLowerCase();
   const scored = active
     .map((plugin) => {
       const score = plugin.capabilities.reduce((sum, cap) => {
         const c = cap.toLowerCase();
-        return sum + (keywords.some((k) => c.includes(k) || k.includes(c)) ? 1 : 0);
+        const phraseHit = c.length > 1 && haystack.includes(c);
+        const keywordHit = keywords.some((k) => c.includes(k) || k.includes(c));
+        return sum + (phraseHit || keywordHit ? 1 : 0);
       }, 0);
       return { plugin, score };
     })

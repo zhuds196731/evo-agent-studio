@@ -46,8 +46,9 @@ ipcMain.handle('evo:net:request', async (_event, payload) => {
 
   try {
     const response = await net.fetch(url, {
-      method: payload?.method === 'POST' ? 'POST' : 'GET',
+      method: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(String(payload?.method || 'GET').toUpperCase()) ? String(payload?.method || 'GET').toUpperCase() : 'GET',
       headers: payload?.headers ?? {},
+      body: payload?.method === 'GET' ? undefined : payload?.body,
       signal: AbortSignal.timeout(15000),
     });
     return { ok: response.ok, status: response.status, text: await response.text() };

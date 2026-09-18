@@ -4,6 +4,7 @@ import { ALPHASAGE_POSITIONS, LEGACY_ALPHASAGE_POSITION_IDS } from '../data/alph
 import { BUILTIN_SAGES } from '../data/sages';
 import { createDefaultTdxConfig, createTdxConfig, readSavedTdxConfig } from '../engine/tdxSettings';
 import { createSkillhubPlugins } from '../data/skillhub';
+import { createMediaCrawlerPlugin } from '../data/mediacrawler';
 import { clearDynamicModelRegistry, registerDynamicModelCatalog } from '../engine/providers';
 
 // 存储键沿用旧名以保护用户已有数据，软件显示名已改为 Self‑Evolving Agent
@@ -125,7 +126,8 @@ export function createInitialState(): AppState {
     activeSessionId: null,
     providerKeys: {},
     dynamicModels: {},
-    plugins: [...BUILTIN_PLUGINS, ...createSkillhubPlugins()],
+    plugins: [...BUILTIN_PLUGINS, ...createSkillhubPlugins(), createMediaCrawlerPlugin()],
+    pluginCategories: ['特殊技能', 'SkillHub', '内置插件', '自定义'],
     evolutionLogs: [],
     evolutionSuggestions: [],
     investmentRuns: [],
@@ -183,6 +185,10 @@ export function loadState(): AppState {
       llm: { ...base.llm, ...(parsed.llm ?? {}) },
       providerKeys: parsed.providerKeys ?? {},
       plugins: mergeById(base.plugins, parsed.plugins as Plugin[] | undefined),
+      pluginCategories: (() => {
+        const saved = parsed.pluginCategories === undefined ? base.pluginCategories : parsed.pluginCategories;
+        return [...new Set(['特殊技能', ...saved])];
+      })(),
       evolutionLogs: parsed.evolutionLogs ?? [],
       evolutionSuggestions: parsed.evolutionSuggestions ?? [],
       investmentRuns: parsed.investmentRuns ?? [],

@@ -317,6 +317,8 @@ export interface Plugin {
   builtin: boolean;
   /** 插件来源；skillhub 表示内置技能包转换而来。 */
   source?: 'core' | 'manual' | 'skillhub';
+  /** 用户可见的插件分类；仅影响展示，不影响调用能力。 */
+  category?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -401,6 +403,8 @@ export interface AppState {
   dynamicModels: Record<string, ProviderModelCatalog>;
   /** 插件注册表 */
   plugins: Plugin[];
+  /** 插件分类目录；特殊技能为内置首栏，其余可由用户维护。 */
+  pluginCategories: string[];
   /** 进化日志 */
   evolutionLogs: EvolutionLog[];
   /** 待审批的进化建议 */
