@@ -180,13 +180,19 @@ async function autoInvokePlugins(
   const keywords = userInput.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
   if (!keywords.length) return [];
 
+  const scored = active
+    .map((plugin) => {
+      const score = plugin.capabilities.reduce((sum, cap) => {
+        const c = cap.toLowerCase();
+        return sum + (keywords.some((k) => c.includes(k) || k.includes(c)) ? 1 : 0);
+      }, 0);
+      return { plugin, score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score);
+
   const invoked: PluginCallRecord[] = [];
-  for (const plugin of active.slice(0, 6)) {
-    const matched = plugin.capabilities.some((cap) => {
-      const c = cap.toLowerCase();
-      return keywords.some((k) => c.includes(k) || k.includes(c));
-    });
-    if (!matched) continue;
+  for (const { plugin } of scored) {
     const res = await invokePlugin(state.plugins ?? [], plugin.id, {
       task: userInput,
       text: userInput,
@@ -195,7 +201,7 @@ async function autoInvokePlugins(
     invoked.push({
       name: plugin.name,
       ok: res.ok,
-      output: (res.output ?? res.error ?? '').slice(0, 500),
+      output: (res.output ?? res.error ?? '').slice(0, 1800),
     });
     if (invoked.length >= 3) break;
   }

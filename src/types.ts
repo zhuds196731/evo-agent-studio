@@ -283,6 +283,8 @@ export interface Plugin {
     qualityPassed: boolean;
   };
   builtin: boolean;
+  /** 插件来源；skillhub 表示内置技能包转换而来。 */
+  source?: 'core' | 'manual' | 'skillhub';
   createdAt: string;
   updatedAt: string;
 }

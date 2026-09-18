@@ -3,6 +3,7 @@ import { BUILTIN_POSITIONS } from '../data/positions';
 import { ALPHASAGE_POSITIONS, LEGACY_ALPHASAGE_POSITION_IDS } from '../data/alphasage';
 import { BUILTIN_SAGES } from '../data/sages';
 import { createDefaultTdxConfig, createTdxConfig, readSavedTdxConfig } from '../engine/tdxSettings';
+import { createSkillhubPlugins } from '../data/skillhub';
 
 // 存储键沿用旧名以保护用户已有数据，软件显示名已改为 Self‑Evolving Agent
 const STORAGE_KEY = 'evo-agent-studio/v1';
@@ -122,7 +123,7 @@ export function createInitialState(): AppState {
     },
     activeSessionId: null,
     providerKeys: {},
-    plugins: BUILTIN_PLUGINS,
+    plugins: [...BUILTIN_PLUGINS, ...createSkillhubPlugins()],
     evolutionLogs: [],
     evolutionSuggestions: [],
     investmentRuns: [],
