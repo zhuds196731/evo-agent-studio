@@ -91,7 +91,7 @@ export async function generate(options: GenerateOptions, config: LlmConfig): Pro
 
   let text: string;
   try {
-    text = await callOpenAiCompatible({ system, history, prompt }, options, activeRouted);
+    text = await callModel({ system, history, prompt }, options, activeRouted);
     if (activeRouted.isFree) recordFreeUsage(activeRouted.provider.id, activeRouted.model.id);
   } catch (e) {
     const err = e as Error;
@@ -211,4 +211,96 @@ async function callOpenAiCompatible(
     throw new Error('模型返回了空内容（可能 max_tokens 不足或服务异常）');
   }
   return content;
+}
+
+async function callModel(
+  ctx: { system: string; history: LlmTurn[]; prompt: string },
+  options: GenerateOptions,
+  routed: RoutedModel,
+): Promise<string> {
+  if (routed.provider.apiProtocol === 'anthropic') return callAnthropic(ctx, options, routed);
+  if (routed.provider.apiProtocol === 'google') return callGoogle(ctx, options, routed);
+  return callOpenAiCompatible(ctx, options, routed);
+}
+
+async function callAnthropic(
+  ctx: { system: string; history: LlmTurn[]; prompt: string },
+  options: GenerateOptions,
+  routed: RoutedModel,
+): Promise<string> {
+  const base = routed.provider.baseUrl.replace(/\/$/, '');
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 90_000);
+  let res: Response;
+  try {
+    res = await fetch(`${base}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': routed.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model: routed.model.id,
+        system: ctx.system,
+        temperature: options.temperature ?? 0.7,
+        max_tokens: options.maxTokens ?? 1024,
+        messages: [...ctx.history.slice(-8), { role: 'user', content: ctx.prompt }],
+      }),
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Anthropic 接口返回 ${res.status}${detail ? `：${detail.slice(0, 160)}` : ''}`);
+  }
+  const data = await res.json() as { content?: { type?: string; text?: string }[] };
+  const text = (data.content ?? []).map((item) => item.text ?? '').join('').trim();
+  if (!text) throw new Error('Anthropic 返回了空内容');
+  return text;
+}
+
+async function callGoogle(
+  ctx: { system: string; history: LlmTurn[]; prompt: string },
+  options: GenerateOptions,
+  routed: RoutedModel,
+): Promise<string> {
+  const base = routed.provider.baseUrl.replace(/\/$/, '');
+  const url = `${base}/models/${routed.model.id}:generateContent?key=${encodeURIComponent(routed.apiKey)}`;
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 90_000);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: ctx.system }] },
+        contents: [
+          ...ctx.history.slice(-8).map((item) => ({ role: item.role === 'assistant' ? 'model' : 'user', parts: [{ text: item.content }] })),
+          { role: 'user', parts: [{ text: ctx.prompt }] },
+        ],
+        generationConfig: {
+          temperature: options.temperature ?? 0.7,
+          maxOutputTokens: options.maxTokens ?? 1024,
+        },
+      }),
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Google 接口返回 ${res.status}${detail ? `：${detail.slice(0, 160)}` : ''}`);
+  }
+  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  const text = (data.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? '').join('').trim();
+  if (!text) throw new Error('Google 返回了空内容');
+  return text;
 }

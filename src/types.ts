@@ -227,6 +227,20 @@ export interface MediaModelPreset {
   /** 能力说明 */
   notes: string;
   tags: string[];
+  /** 模型实际的 API Base URL（可与聊天供应商不同） */
+  baseUrl: string;
+  /** 申请 API Key 的入口 */
+  apiKeyUrl: string;
+  /** 视频/图像接口协议，决定轮询与返回解析 */
+  apiProtocol?: 'openai-image' | 'zhipu-video' | 'luma-video' | 'google-veo' | 'dashscope-video' | 'openai-sora';
+}
+
+/** 仅用于多媒体接入的服务商；不进入聊天模型路由 */
+export interface MediaProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKeyUrl: string;
 }
 
 /** 多媒体模型设置：用户在设置中心一次性配置，前端输入需求时自动匹配 */
@@ -248,6 +262,10 @@ export interface ProviderPreset {
   apiKeyUrl: string;
   models: ModelPreset[];
   builtin: boolean;
+  /** 聊天补全协议；预置表统一给出，默认 OpenAI 兼容 */
+  apiProtocol?: 'openai' | 'anthropic' | 'google';
+  /** 按使用热度展示的区域标签 */
+  region?: '全球' | '国内' | '聚合';
 }
 
 export interface ModelPreset {

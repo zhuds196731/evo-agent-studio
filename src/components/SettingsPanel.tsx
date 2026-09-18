@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { AppState } from '../types';
 import { exportState, importState, resetState, saveState } from '../store/storage';
 import { tokenBudget, tokenMeter } from '../engine/token';
-import { BUILTIN_PROVIDERS, MULTIMEDIA_MODELS, routeModel, freeUsageToday, freeQuotaRemaining } from '../engine/providers';
+import { BUILTIN_PROVIDERS, MULTIMEDIA_MODELS, mediaProviderOf, mediaModelsByType, routeModel, freeUsageToday, freeQuotaRemaining } from '../engine/providers';
+import { generate } from '../engine/llm';
 import HelpIcon from './HelpIcon';
 import TdxConfigEditor from './TdxConfigEditor';
 import { createDefaultTdxConfig } from '../engine/tdxSettings';
@@ -18,6 +19,7 @@ interface Props {
 export default function SettingsPanel({ state, onUpdateState, onReplaceState, onToast }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [showKey, setShowKey] = useState(false);
+  const [providerQuery, setProviderQuery] = useState('');
   const [testing, setTesting] = useState(false);
   const [tdxBusy, setTdxBusy] = useState(false);
   const [showTdxConfigEditor, setShowTdxConfigEditor] = useState(false);
@@ -29,6 +31,17 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
     return configured?.id ?? state.llm.selectedProviderId ?? 'glm';
   });
   const activeProvider = BUILTIN_PROVIDERS.find((p) => p.id === activeProviderId);
+
+  const filteredProviders = useMemo(() => {
+    const q = providerQuery.trim().toLowerCase();
+    if (!q) return BUILTIN_PROVIDERS;
+    return BUILTIN_PROVIDERS.filter((p) => [
+      p.name,
+      p.baseUrl,
+      p.region ?? '',
+      ...p.models.map((m) => `${m.id} ${m.name} ${m.tags.join(' ')}`),
+    ].join(' ').toLowerCase().includes(q));
+  }, [providerQuery]);
 
   const patchLlm = (patch: Partial<AppState['llm']>) =>
     onUpdateState({ llm: { ...state.llm, ...patch } });
@@ -84,22 +97,15 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
     onToast(`正在测试 ${routed.provider.name} · ${routed.model.name} ...`);
     const started = Date.now();
     try {
-      const res = await fetch(`${routed.provider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${routed.apiKey}` },
-        body: JSON.stringify({
-          model: routed.model.id,
-          messages: [{ role: 'user', content: '回复 OK' }],
-          max_tokens: 4,
-        }),
-      });
+      const result = await generate({
+        system: '你是连通性测试器。只回复 OK。',
+        history: [],
+        prompt: '回复 OK',
+        maxTokens: 8,
+        routedModel: routed,
+      }, state.llm);
       const ms = Date.now() - started;
-      if (res.ok) {
-        onToast(`连接成功：${routed.provider.name} · ${routed.model.name}（${ms}ms）`);
-      } else {
-        const text = await res.text().catch(() => '');
-        onToast(`连接失败（HTTP ${res.status}）：${text.slice(0, 120)}`);
-      }
+      onToast(`连接成功：${routed.provider.name} · ${routed.model.name}（${ms}ms，${result.source}）`);
     } catch (e) {
       onToast(`连接失败：${(e as Error).message}`);
     } finally {
@@ -305,6 +311,61 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
             );
           })()}
 
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-200">全网模型目录</h3>
+            <span className="text-[10px] text-slate-500">按热度排序 · {filteredProviders.length} 家</span>
+          </div>
+          <input
+            className="input text-xs"
+            value={providerQuery}
+            onChange={(e) => setProviderQuery(e.target.value)}
+            placeholder="搜索模型 / 供应商 / Base URL…"
+          />
+          <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1">
+            {filteredProviders.map((provider, index) => {
+              const selected = state.llm.selectedProviderId === provider.id;
+              const modelValue = selected && provider.models.some((m) => m.id === state.llm.model)
+                ? state.llm.model
+                : provider.models[0]?.id ?? '';
+              return (
+                <div key={provider.id} className="rounded-xl border border-white/5 bg-ink-700/40 p-2.5">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="w-5 text-center text-[10px] font-semibold text-slate-500">{index + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-xs font-medium text-slate-100">{provider.name}</div>
+                      <div className="text-[10px] text-slate-500">{provider.models.length} 个模型 · {provider.region ?? '全球'}</div>
+                    </div>
+                    <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">{provider.apiProtocol}</span>
+                    {state.providerKeys[provider.id] && <span className="text-[10px] text-jade-400">已配置</span>}
+                  </div>
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <code className="min-w-0 flex-1 truncate rounded bg-black/25 px-2 py-1 text-[10px] text-royal-200">{provider.baseUrl}</code>
+                    <button className="btn-ghost shrink-0 px-1.5 py-0.5 text-[10px]" title="复制 Base URL" onClick={() => { navigator.clipboard?.writeText(provider.baseUrl); onToast('Base URL 已复制'); }}>复制</button>
+                    <a className="btn-ghost shrink-0 px-1.5 py-0.5 text-[10px]" href={provider.apiKeyUrl} target="_blank" rel="noopener noreferrer">申请 Key</a>
+                  </div>
+                  <input
+                    className="input mb-2 text-[11px]"
+                    type={showKey ? 'text' : 'password'}
+                    value={state.providerKeys[provider.id] || ''}
+                    placeholder={`${provider.name} API Key`}
+                    onChange={(e) => onUpdateState({ providerKeys: { ...state.providerKeys, [provider.id]: e.target.value } })}
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      className="input min-w-0 flex-1 text-[11px]"
+                      value={modelValue}
+                      onChange={(e) => onUpdateState({ llm: { ...state.llm, enabled: true, provider: 'openai-compatible', selectedProviderId: provider.id, baseUrl: provider.baseUrl, model: e.target.value } })}
+                    >
+                      {provider.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                    <button className="btn-ghost shrink-0 px-2 py-1 text-[10px]" onClick={() => onUpdateState({ llm: { ...state.llm, enabled: true, provider: 'openai-compatible', selectedProviderId: provider.id, baseUrl: provider.baseUrl, model: modelValue } })}>设为当前</button>
+                  </div>
+                </div>
+              );
+            })}
+            {!filteredProviders.length && <div className="py-4 text-center text-xs text-slate-500">没有匹配的模型供应商</div>}
+          </div>
+
           <div>
             <label className="label flex items-center">
               默认发散度 {state.llm.temperature.toFixed(1)}
@@ -464,6 +525,50 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                 </div>
               );
             })}
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-slate-200">🎬 视频模型接入目录</h4>
+              <span className="text-[10px] text-slate-500">每个服务商独立 Key，本机保存</span>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {Array.from(new Map(mediaModelsByType('video').map((m) => [m.providerId, m])).values()).map((firstModel) => {
+                const provider = mediaProviderOf(firstModel.providerId);
+                if (!provider) return null;
+                const models = mediaModelsByType('video').filter((m) => m.providerId === firstModel.providerId);
+                const configured = Boolean(state.providerKeys[provider.id]);
+                return (
+                  <div key={provider.id} className="rounded-xl border border-white/5 bg-ink-700/40 p-2.5">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-xs font-medium text-slate-100">{provider.name}</div>
+                        <div className="text-[10px] text-slate-500">{models.length} 个视频模型</div>
+                      </div>
+                      {configured ? <span className="text-[10px] text-jade-400">已配置</span> : <span className="text-[10px] text-amber-300">未配置</span>}
+                    </div>
+                    <div className="mb-2 flex items-center gap-1.5">
+                      <code className="min-w-0 flex-1 truncate rounded bg-black/25 px-2 py-1 text-[10px] text-royal-200">{firstModel.baseUrl}</code>
+                      <button className="btn-ghost shrink-0 px-1.5 py-0.5 text-[10px]" onClick={() => { navigator.clipboard?.writeText(firstModel.baseUrl); onToast('视频接口 Base URL 已复制'); }}>复制</button>
+                    </div>
+                    <input
+                      className="input mb-2 text-[11px]"
+                      type={showKey ? 'text' : 'password'}
+                      value={state.providerKeys[provider.id] || ''}
+                      placeholder={`${provider.name} API Key`}
+                      onChange={(e) => onUpdateState({ providerKeys: { ...state.providerKeys, [provider.id]: e.target.value } })}
+                    />
+                    <div className="space-y-1">
+                      {models.map((m) => (
+                        <div key={m.id} className="rounded bg-white/5 px-2 py-1 text-[10px] text-slate-300">
+                          <div className="truncate font-medium">{m.name}</div>
+                          <div className="truncate text-slate-500">{m.id} · {m.apiProtocol}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
 
