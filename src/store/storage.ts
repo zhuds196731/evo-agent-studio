@@ -2,6 +2,7 @@ import type { AppState, Persona, Position, Session, Plugin } from '../types';
 import { BUILTIN_POSITIONS } from '../data/positions';
 import { ALPHASAGE_POSITIONS, LEGACY_ALPHASAGE_POSITION_IDS } from '../data/alphasage';
 import { BUILTIN_SAGES } from '../data/sages';
+import { createDefaultTdxConfig, createTdxConfig, readSavedTdxConfig } from '../engine/tdxSettings';
 
 // 存储键沿用旧名以保护用户已有数据，软件显示名已改为 Self‑Evolving Agent
 const STORAGE_KEY = 'evo-agent-studio/v1';
@@ -126,6 +127,10 @@ export function createInitialState(): AppState {
     evolutionSuggestions: [],
     investmentRuns: [],
     notes: [],
+    tdx: (() => {
+      const saved = readSavedTdxConfig();
+      return saved ? createTdxConfig(saved, 'custom') : createDefaultTdxConfig();
+    })(),
     notepad: { maxUploadBytes: null },
     media: {},
   };
@@ -175,6 +180,7 @@ export function loadState(): AppState {
       investmentRuns: parsed.investmentRuns ?? [],
       notes: parsed.notes ?? [],
       notepad: { ...base.notepad, ...(parsed.notepad ?? {}) },
+      tdx: parsed.tdx ? { ...base.tdx, ...parsed.tdx } : base.tdx,
       media: parsed.media ?? {},
     };
   } catch {

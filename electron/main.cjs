@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const fs = require('fs/promises');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 const DEFAULT_TDX_CONFIG_PATHS = [
   process.env.EVO_TDX_CONFIG,
@@ -37,6 +38,10 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 
+async function loadTdxBridge() {
+  return import(pathToFileURL(path.join(__dirname, '..', 'vite.tdxPlugin.mjs')).href);
+}
+
 ipcMain.handle('evo:tdx:read-default-config', async () => {
   for (const candidate of DEFAULT_TDX_CONFIG_PATHS) {
     try {
@@ -47,6 +52,29 @@ ipcMain.handle('evo:tdx:read-default-config', async () => {
     }
   }
   return null;
+});
+
+ipcMain.handle('evo:tdx:parse-config', async (_event, payload) => {
+  const bridge = await loadTdxBridge();
+  return bridge.parseTdxConfigText(payload?.config ?? '');
+});
+
+ipcMain.handle('evo:tdx:probe-config', async (_event, payload) => {
+  const bridge = await loadTdxBridge();
+  const parsed = bridge.parseTdxConfigText(payload?.config ?? '');
+  const results = await bridge.probeTdxConfigText(parsed, payload?.code ?? '600519', payload?.limit ?? 8);
+  const best = results.filter((row) => row.ok).sort((a, b) => a.latencyMs - b.latencyMs)[0] ?? null;
+  return { results, best };
+});
+
+ipcMain.handle('evo:tdx:daily-bars', async (_event, payload) => {
+  const bridge = await loadTdxBridge();
+  const bars = await bridge.readTdxDailyBars(
+    { address: String(payload?.host?.address ?? ''), port: Number(payload?.host?.port ?? 0) },
+    String(payload?.code ?? '600519'),
+    Number(payload?.count ?? 120),
+  );
+  return { bars, count: bars.length };
 });
 
 app.on('window-all-closed', () => {

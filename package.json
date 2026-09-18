@@ -13,7 +13,8 @@
     },
     "files": [
       "dist/**",
-      "electron/**"
+      "electron/**",
+      "vite.tdxPlugin.mjs"
     ],
     "win": {
       "target": [

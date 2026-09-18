@@ -75,14 +75,17 @@ async function postJson<T>(path: string, body: unknown, timeoutMs = 25000): Prom
 }
 
 export function parseTdxConfig(config: string) {
+  if (window.evoTdx?.parseConfig) return window.evoTdx.parseConfig(config);
   return postJson<TdxParseResult>('/api/tdx/config/parse', { config });
 }
 
 export function probeTdxConfig(config: string, code: string, limit = 8) {
+  if (window.evoTdx?.probeConfig) return window.evoTdx.probeConfig(config, code, limit);
   return postJson<TdxProbeResponse>('/api/tdx/config/probe', { config, code, limit });
 }
 
 export function fetchTdxDailyBars(host: TdxHost, code: string, count = 120) {
+  if (window.evoTdx?.fetchDailyBars) return window.evoTdx.fetchDailyBars(host, code, count);
   return postJson<{ bars: TdxBar[]; count: number }>('/api/tdx/kline', { host, code, count }, 12000);
 }
 

@@ -376,5 +376,19 @@ export interface AppState {
   /** 记事本设置 */
   notepad: NotepadSettings;
   /** 多媒体模型设置（绘图 / 视频） */
+  /** 通达信只读行情源配置；设置中心与投资分析共用 */
+  tdx: TdxRuntimeConfig;
   media: MediaSettings;
+}
+/** 通达信只读行情源的运行时配置，随 AppState 一起保存、备份和导入。 */
+export type TdxConfigSource = 'default' | 'custom' | 'tdx';
+
+export interface TdxRuntimeConfig {
+  /** Connect.cfg 文本；只解析行情主站，不保存账号密码。 */
+  config: string;
+  source: TdxConfigSource;
+  /** source=tdx 时记录本机原配置路径。 */
+  sourcePath?: string;
+  updatedAt: string;
+  autoLoad: boolean;
 }

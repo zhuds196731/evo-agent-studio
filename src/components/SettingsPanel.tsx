@@ -4,6 +4,9 @@ import { exportState, importState, resetState, saveState } from '../store/storag
 import { tokenBudget, tokenMeter } from '../engine/token';
 import { BUILTIN_PROVIDERS, MULTIMEDIA_MODELS, routeModel, freeUsageToday, freeQuotaRemaining } from '../engine/providers';
 import HelpIcon from './HelpIcon';
+import TdxConfigEditor from './TdxConfigEditor';
+import { createDefaultTdxConfig } from '../engine/tdxSettings';
+import { parseTdxConfig } from '../engine/tdxBridge';
 
 interface Props {
   state: AppState;
@@ -16,6 +19,8 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
   const fileRef = useRef<HTMLInputElement>(null);
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [tdxBusy, setTdxBusy] = useState(false);
+  const [showTdxConfigEditor, setShowTdxConfigEditor] = useState(false);
   /** 当前正在编辑的供应商（紧凑下拉） */
   const [activeProviderId, setActiveProviderId] = useState(() => {
     const saved = state.llm.selectedProviderId;
@@ -27,6 +32,35 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
 
   const patchLlm = (patch: Partial<AppState['llm']>) =>
     onUpdateState({ llm: { ...state.llm, ...patch } });
+
+  const saveTdxConfig = async (config: string) => {
+    setTdxBusy(true);
+    try {
+      const parsed = await parseTdxConfig(config);
+      if (!parsed.groups.hq.length) throw new Error('配置中未找到行情主站');
+      onUpdateState({
+        tdx: {
+          config,
+          source: 'custom',
+          sourcePath: undefined,
+          updatedAt: new Date().toISOString(),
+          autoLoad: true,
+        },
+      });
+      setShowTdxConfigEditor(false);
+      onToast('通达信配置已保存，投资分析与设置中心同步更新');
+    } catch (error) {
+      onToast(`通达信配置保存失败：${(error as Error).message}`);
+    } finally {
+      setTdxBusy(false);
+    }
+  };
+
+  const restoreTdxDefaultConfig = () => {
+    onUpdateState({ tdx: createDefaultTdxConfig() });
+    setShowTdxConfigEditor(false);
+    onToast('已恢复内置默认行情源配置');
+  };
 
   /** 显式保存：立即写入本机存储并给出确认 */
   const handleSave = () => {
@@ -334,6 +368,39 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
             头像支持三种来源：内置二次元占位、上传真人照片（自动压缩为 256px 方形）、复制 AI
             形象提示词后用多模态生成能力产出高清立绘再上传。
           </div>
+        </section>
+
+        <section className="space-y-3 rounded-xl border border-white/5 bg-ink-700/35 p-3 lg:col-span-2">
+          <h3 className="text-sm font-semibold text-slate-200">通达信行情源</h3>
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            这里是全软件共用的只读行情配置。桌面端会自动识别本机通达信 Connect.cfg；修改后投资分析、行情监控与全量备份使用同一份配置。
+          </p>
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            <div className="rounded-lg border border-white/5 bg-white/[0.03] p-3 text-[11px] leading-5 text-slate-300">
+              <div className="font-medium text-slate-100">当前来源</div>
+              <div className="mt-1">
+                {state.tdx?.source === "tdx"
+                  ? `本机通达信配置${state.tdx.sourcePath ? `：${state.tdx.sourcePath}` : ""}`
+                  : state.tdx?.source === "custom"
+                    ? "自定义配置（保存在本应用状态中）"
+                    : "内置默认配置"}
+              </div>
+              {state.tdx?.updatedAt && (
+                <div className="mt-1 text-[10px] text-slate-500">更新时间：{new Date(state.tdx.updatedAt).toLocaleString("zh-CN", { hour12: false })}</div>
+              )}
+            </div>
+            <button className="btn-royal px-3 py-1.5 text-xs" onClick={() => setShowTdxConfigEditor(true)}>
+              修改配置
+            </button>
+          </div>
+          <TdxConfigEditor
+            open={showTdxConfigEditor}
+            config={state.tdx?.config ?? ""}
+            busy={tdxBusy}
+            onClose={() => setShowTdxConfigEditor(false)}
+            onSave={saveTdxConfig}
+            onRestoreDefault={restoreTdxDefaultConfig}
+          />
         </section>
 
         <section className="space-y-3 lg:col-span-2">

@@ -483,3 +483,6 @@ export function tdxBridgePlugin() {
     },
   };
 }
+export const parseTdxConfigText = parseTdxConfig;
+export const probeTdxConfigText = probeConfig;
+export const readTdxDailyBars = readDailyBars;

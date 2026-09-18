@@ -19,8 +19,7 @@ import MarketMonitorPanel from './MarketMonitorPanel';
 import InvestmentAiPanel from './InvestmentAiPanel';
 import TdxConfigEditor from './TdxConfigEditor';
 import type { AlphaSageDataset, AlphaSageLayerKey } from '../engine/alphasageData';
-import defaultTdxConfig from '../../public/tdx/Connect.default.cfg?raw';
-import { clearSavedTdxConfig, readSavedTdxConfig, writeSavedTdxConfig } from '../engine/tdxSettings';
+import { createDefaultTdxConfig } from '../engine/tdxSettings';
 import {
   fetchTdxDailyBars,
   parseTdxConfig,
@@ -79,48 +78,43 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [dataset, setDataset] = useState<AlphaSageDataset | null>(null);
   const [tdxOpen, setTdxOpen] = useState(false);
-  const [tdxConfigText, setTdxConfigText] = useState('');
   const [tdxParsed, setTdxParsed] = useState<TdxParseResult | null>(null);
   const [tdxResults, setTdxResults] = useState<TdxProbeResult[]>([]);
   const [tdxBest, setTdxBest] = useState<TdxProbeResult | null>(null);
   const [tdxBusy, setTdxBusy] = useState(false);
   const [tdxMessage, setTdxMessage] = useState<string | null>(null);
   const [showTdxConfigEditor, setShowTdxConfigEditor] = useState(false);
-  const [tdxConfigSource, setTdxConfigSource] = useState<'default' | 'custom' | 'tdx'>('default');
-  const [tdxConfigPath, setTdxConfigPath] = useState<string | null>(null);
   const fetchRequestId = useRef(0);
+
+  const tdxRuntime = state.tdx;
+  const tdxConfigText = tdxRuntime?.config ?? '';
+  const tdxConfigSource = tdxRuntime?.source ?? 'default';
+  const tdxConfigPath = tdxRuntime?.sourcePath ?? null;
 
   useEffect(() => {
     let cancelled = false;
-    const saved = readSavedTdxConfig();
-    if (saved) {
-      setTdxConfigText(saved);
-      setTdxConfigSource('custom');
-      return () => { cancelled = true; };
-    }
+    if (tdxRuntime?.source !== 'default') return () => { cancelled = true; };
     const native = window.evoTdx?.readDefaultConfig?.();
-    if (native) {
-      native
-        .then((result) => {
-          if (cancelled) return;
-          if (result?.text) {
-            setTdxConfigText(result.text);
-            setTdxConfigPath(result.path);
-            setTdxConfigSource('tdx');
-          } else {
-            setTdxConfigText(defaultTdxConfig);
-            setTdxConfigSource('default');
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setTdxConfigText(defaultTdxConfig);
-        });
-    } else {
-      setTdxConfigText(defaultTdxConfig);
-      setTdxConfigSource('default');
-    }
+    if (!native) return () => { cancelled = true; };
+
+    native
+      .then((result) => {
+        if (!cancelled && result?.text) {
+          onUpdateState({
+            tdx: {
+              config: result.text,
+              source: 'tdx',
+              sourcePath: result.path,
+              updatedAt: new Date().toISOString(),
+              autoLoad: true,
+            },
+          });
+        }
+      })
+      .catch(() => undefined);
+
     return () => { cancelled = true; };
-  }, []);
+  }, [onUpdateState, tdxRuntime?.source, tdxRuntime?.config]);
 
   const targetSecid = useMemo(() => {
     const code = /(\d{6})/.exec(draft.target)?.[1] ?? '600519';
@@ -174,7 +168,15 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
       let config = tdxConfigText;
       if (file) {
         config = await readTdxConfigFile(file);
-        setTdxConfigText(config);
+        onUpdateState({
+          tdx: {
+            config,
+            source: 'custom',
+            sourcePath: undefined,
+            updatedAt: new Date().toISOString(),
+            autoLoad: true,
+          },
+        });
       }
       if (!config.trim()) throw new Error('请先选择或粘贴通达信配置文件');
       const parsed = await parseTdxConfig(config);
@@ -207,18 +209,22 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
   };
 
   const saveTdxConfig = (config: string) => {
-    writeSavedTdxConfig(config);
-    setTdxConfigText(config);
-    setTdxConfigSource('custom');
+    onUpdateState({
+      tdx: {
+        config,
+        source: 'custom',
+        sourcePath: undefined,
+        updatedAt: new Date().toISOString(),
+        autoLoad: true,
+      },
+    });
     setShowTdxConfigEditor(false);
     setTdxMessage('配置已保存，下一步可点击「连接行情源」验证。');
     onToast('通达信配置已保存');
   };
 
   const restoreTdxDefaultConfig = () => {
-    clearSavedTdxConfig();
-    setTdxConfigText(defaultTdxConfig);
-    setTdxConfigSource('default');
+    onUpdateState({ tdx: createDefaultTdxConfig() });
     setShowTdxConfigEditor(false);
     setTdxMessage('已恢复内置默认行情源配置。');
   };
