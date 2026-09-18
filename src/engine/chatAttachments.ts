@@ -95,6 +95,15 @@ export const chatAttachmentStore = {
   },
 };
 
+export type PendingChatAttachment = ChatAttachment & {
+  /** `existing` attachments are still referenced by a stored message. */
+  origin: 'new' | 'existing';
+};
+
+export function toMessageAttachments(attachments: PendingChatAttachment[]): ChatAttachment[] {
+  return attachments.map(({ origin: _origin, ...attachment }) => attachment);
+}
+
 export function attachmentTypeLabel(attachment: ChatAttachment): string {
   const mime = attachment.mime.toLowerCase();
   if (mime.startsWith('image/')) return '图片';

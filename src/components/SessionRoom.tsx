@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from 'react';
 import type { AppState, ChatAttachment, ChatMessage, LlmConfig, MediaModelType, SceneType, Session } from '../types';
 import Avatar from './Avatar';
 import { MULTIMEDIA_MODELS, routeModel } from '../engine/providers';
@@ -18,6 +18,8 @@ import { downloadSessionMarkdown } from '../engine/sessionExport';
 import LlmSetupModal from './LlmSetupModal';
 import {
   attachmentEmoji,
+  type PendingChatAttachment,
+  toMessageAttachments,
   attachmentTypeLabel,
   buildAttachmentContext,
   chatAttachmentStore,
@@ -75,7 +77,10 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const voice = useVoiceInput({ onText: (t) => setDraft(t), onError: (msg) => setMicError(msg) });
   /** 正在修改的已发送提示词 */
-  const [editing, setEditing] = useState<{ id: string } | null>(null);
+  const [editing, setEditing] = useState<{
+    id: string;
+    originalAttachments: ChatAttachment[];
+  } | null>(null);
   /** 当前会话的暂存提示词 */
   const [stash, setStash] = useState<StashItem[]>([]);
   /** 侧栏搜索关键词：匹配标题与消息内容 */
@@ -96,8 +101,14 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   const [showLoaded, setShowLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
-  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([]);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false);
+  const pendingAttachmentsRef = useRef<PendingChatAttachment[]>([]);
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
 
   useEffect(() => {
     if (initialScene) setScene(initialScene);
@@ -145,6 +156,16 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   useEffect(() => {
     setStash(active ? readStash(active.id) : []);
     setEditing(null);
+    setDraft('');
+
+    const staleIds = pendingAttachmentsRef.current
+      .filter((item) => item.origin === 'new')
+      .map((item) => item.id);
+    pendingAttachmentsRef.current = [];
+    setPendingAttachments([]);
+    if (staleIds.length) {
+      void chatAttachmentStore.removeMany(staleIds).catch(() => undefined);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id]);
 
@@ -300,9 +321,23 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
 
   /** 修改已发送的提示词：载入输入框，发送后原消息原地更新 */
   const startEditMessage = (m: ChatMessage) => {
+    const originalAttachments = m.attachments ?? [];
     setDraft(m.content);
-    setPendingAttachments(m.attachments ?? []);
-    setEditing({ id: m.id });
+    setPendingAttachments(
+      originalAttachments.map((item) => ({ ...item, origin: 'existing' as const })),
+    );
+    setEditing({ id: m.id, originalAttachments });
+  };
+
+  const cancelEditing = () => {
+    if (!editing) return;
+    const staleIds = pendingAttachments
+      .filter((item) => item.origin === 'new')
+      .map((item) => item.id);
+    setPendingAttachments(editing.originalAttachments.map((item) => ({ ...item, origin: 'existing' as const })));
+    setEditing(null);
+    setDraft('');
+    if (staleIds.length) void chatAttachmentStore.removeMany(staleIds).catch(() => undefined);
   };
 
   const deleteMessage = async (id: string) => {
@@ -357,16 +392,19 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   };
 
   const addAttachmentFiles = async (fileList: FileList | File[] | null) => {
-    if (!fileList?.length || attachmentBusy) return;
+    const files = Array.from(fileList ?? []);
+    if (!files.length || attachmentBusy) return;
     setAttachmentBusy(true);
     try {
-      const added: ChatAttachment[] = [];
+      const added: PendingChatAttachment[] = [];
       const failed: string[] = [];
-      for (const file of Array.from(fileList)) {
+      for (const file of files) {
         try {
-          added.push(await chatAttachmentStore.put(file));
-        } catch {
-          failed.push(file.name);
+          const attachment = await chatAttachmentStore.put(file);
+          added.push({ ...attachment, origin: 'new' as const });
+        } catch (error) {
+          const reason = (error as Error)?.message || '\u4fdd\u5b58\u5931\u8d25';
+          failed.push(`${file.name}\uff1a${reason}`);
         }
       }
       if (added.length) setPendingAttachments((prev) => [...prev, ...added]);
@@ -377,12 +415,35 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   };
 
   const removePendingAttachment = async (id: string) => {
+    const target = pendingAttachments.find((item) => item.id === id);
     setPendingAttachments((prev) => prev.filter((item) => item.id !== id));
+    if (target?.origin !== 'new') return;
     try {
       await chatAttachmentStore.remove(id);
     } catch {
       onToast('\u9644\u4ef6\u79fb\u9664\u5931\u8d25\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9');
     }
+  };
+
+  const clearPendingAttachments = async () => {
+    const staleIds = pendingAttachments
+      .filter((item) => item.origin === 'new')
+      .map((item) => item.id);
+    setPendingAttachments([]);
+    if (staleIds.length) {
+      try {
+        await chatAttachmentStore.removeMany(staleIds);
+      } catch {
+        onToast('\u9644\u4ef6\u6e05\u7406\u5931\u8d25\uff0c\u53ef\u7a0d\u540e\u91cd\u8bd5');
+      }
+    }
+  };
+
+  const handleAttachmentDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setIsDraggingFiles(false);
+    const files = Array.from(event.dataTransfer?.files ?? []);
+    if (files.length) void addAttachmentFiles(files);
   };
 
   const submitMessage = async (
@@ -432,13 +493,37 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     }
   };
 
+  const deleteActiveSession = async () => {
+    if (!active || !window.confirm('\u5220\u9664\u8fd9\u4e2a\u4f1a\u8bdd\u53ca\u5176\u5168\u90e8\u9644\u4ef6\uff1f\u5220\u9664\u540e\u4e0d\u53ef\u6062\u590d\u3002')) return;
+    const attachmentIds = active.messages.flatMap((message) => (message.attachments ?? []).map((item) => item.id));
+    const staleIds = pendingAttachments
+      .filter((item) => item.origin === 'new')
+      .map((item) => item.id);
+
+    onUpdateState({
+      sessions: state.sessions.filter((s) => s.id !== active.id),
+      activeSessionId: null,
+    });
+    setEditing(null);
+    setDraft('');
+    setPendingAttachments([]);
+    try {
+      await chatAttachmentStore.removeMany([...attachmentIds, ...staleIds]);
+    } catch {
+      onToast('\u4f1a\u8bdd\u5df2\u5220\u9664\uff0c\u4f46\u90e8\u5206\u9644\u4ef6\u7f13\u5b58\u6e05\u7406\u5931\u8d25');
+    }
+  };
+
   const send = async () => {
     const text = draft.trim();
     if ((!text && !pendingAttachments.length) || !active || busy || attachmentBusy) return;
     if (voice.listening) voice.stop();
 
     if (editing) {
-      const attachments = pendingAttachments;
+      const attachments = toMessageAttachments(pendingAttachments);
+      const removedIds = editing.originalAttachments
+        .filter((item) => !attachments.some((next) => next.id === item.id))
+        .map((item) => item.id);
       onUpdateState({
         sessions: state.sessions.map((s) =>
           s.id === active.id
@@ -461,28 +546,32 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
       setEditing(null);
       setDraft('');
       setPendingAttachments([]);
+      if (removedIds.length) {
+        await chatAttachmentStore.removeMany(removedIds).catch(() => undefined);
+      }
       onToast('\u5df2\u4fdd\u5b58\u5bf9\u63d0\u793a\u8bcd\u7684\u4fee\u6539');
       return;
     }
 
     const outgoingText = text || '\u8bf7\u9605\u8bfb\u5e76\u5206\u6790\u4e0a\u4f20\u7684\u9644\u4ef6\u3002';
 
+    const messageAttachments = toMessageAttachments(pendingAttachments);
+
     if (!hasModel) {
-      const attachmentContext = await buildAttachmentContext(pendingAttachments);
+      const attachmentContext = await buildAttachmentContext(messageAttachments);
       setPendingPrompt([outgoingText, attachmentContext].filter(Boolean).join('\n\n'));
       setShowModelSetup(true);
       return;
     }
 
-    const attachments = pendingAttachments;
     setPendingAttachments([]);
-    await submitMessage(outgoingText, { attachments });
+    await submitMessage(outgoingText, { attachments: messageAttachments });
   };
 
   const handleModelConfigured = (llm: LlmConfig, providerKeys: Record<string, string>) => {
     setShowModelSetup(false);
     const text = pendingPrompt;
-    const attachments = pendingAttachments;
+    const attachments = toMessageAttachments(pendingAttachments);
     setPendingPrompt(null);
     setPendingAttachments([]);
     if (text) void submitMessage(text, { llm, providerKeys, attachments });
@@ -635,12 +724,7 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                 </button>
                 <button
                   className="btn-ghost text-xs"
-                  onClick={() =>
-                    onUpdateState({
-                      sessions: state.sessions.filter((s) => s.id !== active.id),
-                      activeSessionId: null,
-                    })
-                  }
+                  onClick={() => void deleteActiveSession()}
                 >
                   删除会话
                 </button>
@@ -738,7 +822,7 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                                   <span aria-hidden="true">{attachmentEmoji(a)}</span>
                                   <span className="min-w-0 flex-1 truncate font-medium">{a.name}</span>
                                   <span className="shrink-0 text-slate-500">
-                                    {attachmentTypeLabel(a)} ? {formatBytes(a.size)}
+                                    {attachmentTypeLabel(a)} {'\u00b7'} {formatBytes(a.size)}
                                   </span>
                                 </button>
                               ))}
@@ -799,7 +883,22 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
               <div ref={bottomRef} />
             </div>
 
-            <div className="wx-inputbar">
+            <div
+                className={`wx-inputbar relative ${isDraggingFiles ? 'ring-2 ring-royal-500/40' : ''}`}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsDraggingFiles(true);
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node)) setIsDraggingFiles(false);
+                }}
+                onDrop={handleAttachmentDrop}
+              >
+                {isDraggingFiles && (
+                  <div className="pointer-events-none absolute inset-2 z-10 flex items-center justify-center rounded-xl border border-dashed border-royal-400/60 bg-ink-800/80 text-xs text-royal-200">
+                    {'\u677e\u5f00\u9644\u4ef6\u5373\u53ef\u6dfb\u52a0'}
+                  </div>
+                )}
               {/* 已加载插件条：ACTIVE 插件在对话中自动生效，悬停查看能力 */}
               {loadedPlugins.length > 0 && (
                 <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-white/5 bg-ink-700/40 px-2.5 py-1.5 text-[11px]">
@@ -911,19 +1010,15 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
               {/* 修改提示词横幅 */}
               {editing && (
                 <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
-                  ✏️ 正在修改已发送的提示词，发送后原消息原地更新（不产生新回复）
+                  {'\u270f\ufe0f \u6b63\u5728\u4fee\u6539\u5df2\u53d1\u9001\u7684\u63d0\u793a\u8bcd\uff0c\u53d1\u9001\u540e\u539f\u6d88\u606f\u539f\u5730\u66f4\u65b0\uff08\u4e0d\u4ea7\u751f\u65b0\u56de\u590d\uff09'}
                   <button
                     className="ml-auto text-[10px] text-slate-400 hover:text-slate-200"
-                    onClick={() => {
-                      setEditing(null);
-                      setDraft('');
-                    }}
+                    onClick={cancelEditing}
                   >
-                    取消修改 ✕
+                    {'\u53d6\u6d88\u4fee\u6539 \u2715'}
                   </button>
                 </div>
               )}
-              {/* 暂存的提示词条 */}
               {stash.length > 0 && (
                 <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-amber-500/20 bg-ink-700/40 px-2.5 py-1.5 text-[11px]">
                   <span className="text-amber-400">⏸ 已暂停 {stash.length} 条</span>
@@ -972,11 +1067,17 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                         title="\u79fb\u9664\u9644\u4ef6"
                         onClick={() => void removePendingAttachment(a.id)}
                       >
-                        ?
+                        {'\u2715'}
                       </button>
                     </span>
                   ))}
-                  {attachmentBusy && <span className="text-slate-400">\u6b63\u5728\u4fdd\u5b58\u9644\u4ef6\u2026</span>}
+                  {attachmentBusy && <span className="text-slate-400">{'\u6b63\u5728\u4fdd\u5b58\u9644\u4ef6\u2026'}</span>}
+                  <button
+                    className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-slate-500 transition hover:text-rose-300"
+                    onClick={() => void clearPendingAttachments()}
+                  >
+                    {'\u6e05\u7a7a'}
+                  </button>
                 </div>
               )}
               <div className="mb-2 flex items-center gap-3 text-lg text-slate-400">
@@ -1001,7 +1102,7 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                   onClick={() => attachmentInputRef.current?.click()}
                   className="transition hover:text-royal-300"
                 >
-                  ??
+                  {'\u{1F4CE}'}
                 </button>
                 <button
                   title={voice.supported ? (voice.listening ? '停止语音输入' : '语音输入（中文识别）') : '当前浏览器不支持语音输入，请用 Chrome/Edge'}
@@ -1034,6 +1135,13 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
               <div className="flex items-end gap-2">
                 <textarea
                   className="input min-h-[52px] flex-1"
+                  onPaste={(event) => {
+                    const files = Array.from(event.clipboardData?.files ?? []);
+                    if (files.length) {
+                      event.preventDefault();
+                      void addAttachmentFiles(files);
+                    }
+                  }}
                   placeholder={
                     active.scene === 'consult'
                       ? '说出你的困惑，先哲会按其思维框架回应…（也可点 🎙️ 语音输入）'

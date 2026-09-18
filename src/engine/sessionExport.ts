@@ -42,7 +42,11 @@ export function sessionToMarkdown(session: Session, state: AppState): string {
     } else {
       lines.push(m.content);
     }
-    lines.push('');
+        if (m.attachments?.length) {
+      lines.push('');
+      lines.push(`\u9644\u4ef6\uff1a${m.attachments.map((item) => `${item.name} (${item.mime}, ${item.size} bytes)`).join('\u3001')}`);
+    }
+lines.push('');
   }
   return lines.join('\n');
 }
