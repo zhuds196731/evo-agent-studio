@@ -103,6 +103,10 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [pendingAttachments, setPendingAttachments] = useState<PendingChatAttachment[]>([]);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentProgress, setAttachmentProgress] = useState<
+{ done: number; total: number; current: string } | null
+  >(null);
+  const [attachmentErrors, setAttachmentErrors] = useState<string[]>([]);
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const pendingAttachmentsRef = useRef<PendingChatAttachment[]>([]);
 
@@ -398,18 +402,26 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     try {
       const added: PendingChatAttachment[] = [];
       const failed: string[] = [];
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
+        setAttachmentProgress({ done: index, total: files.length, current: file.name });
         try {
           const attachment = await chatAttachmentStore.put(file);
           added.push({ ...attachment, origin: 'new' as const });
+          if (attachment.storage === 'memory') {
+            failed.push(`${file.name}：浏览器持久存储不可用，已临时保存，刷新后会丢失`);
+          }
         } catch (error) {
-          const reason = (error as Error)?.message || '\u4fdd\u5b58\u5931\u8d25';
-          failed.push(`${file.name}\uff1a${reason}`);
+          const reason = (error as Error)?.message || '保存失败';
+          failed.push(`${file.name}：${reason}`);
         }
       }
       if (added.length) setPendingAttachments((prev) => [...prev, ...added]);
-      if (failed.length) onToast(`\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25\uff1a${failed.join('\u3001')}`);
+      if (failed.length) {
+        setAttachmentErrors(failed);
+        onToast(`附件保存提醒：${failed.join('、')}`);
+      }
     } finally {
+      setAttachmentProgress(null);
       setAttachmentBusy(false);
     }
   };
@@ -1045,6 +1057,24 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                   ))}
                 </div>
               )}
+              {attachmentProgress && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg border border-royal-500/20 bg-royal-500/10 px-2.5 py-1.5 text-[11px] text-royal-200">
+                  <span className="h-1.5 w-1.5 animate-ping rounded-full bg-royal-400" />
+                  <span className="min-w-0 flex-1 truncate">
+                    正在保存附件 {attachmentProgress.done + 1}/{attachmentProgress.total}：{attachmentProgress.current}
+                  </span>
+                </div>
+              )}
+              {attachmentErrors.length > 0 && (
+                <div className="mb-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-200">
+                  <div className="font-medium">附件保存提醒</div>
+                  <ul className="mt-1 space-y-0.5">
+                    {attachmentErrors.map((item) => (
+                      <li key={item} className="break-all">{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {pendingAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-royal-500/25 bg-royal-500/10 px-2.5 py-2 text-[11px]">
                   {pendingAttachments.map((a) => (
@@ -1064,14 +1094,14 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                       </button>
                       <button
                         className="text-slate-500 transition hover:text-rose-300"
-                        title="\u79fb\u9664\u9644\u4ef6"
+                        title="移除附件"
                         onClick={() => void removePendingAttachment(a.id)}
                       >
                         {'\u2715'}
                       </button>
                     </span>
                   ))}
-                  {attachmentBusy && <span className="text-slate-400">{'\u6b63\u5728\u4fdd\u5b58\u9644\u4ef6\u2026'}</span>}
+                  {attachmentBusy && <span className="text-slate-400">正在保存附件…</span>}
                   <button
                     className="ml-auto rounded px-1.5 py-0.5 text-[10px] text-slate-500 transition hover:text-rose-300"
                     onClick={() => void clearPendingAttachments()}
@@ -1098,7 +1128,7 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                   }}
                 />
                 <button
-                  title="\u4e0a\u4f20\u9644\u4ef6\uff08\u4e0d\u9650\u6587\u4ef6\u7c7b\u578b\uff0c\u53ef\u591a\u9009\uff09"
+                  title="上传附件（不限文件类型，可多选）"
                   onClick={() => attachmentInputRef.current?.click()}
                   className="transition hover:text-royal-300"
                 >

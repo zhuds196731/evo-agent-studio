@@ -74,6 +74,8 @@ export interface ChatAttachment {
   mime: string;
   size: number;
   createdAt: string;
+  /** 标记仅本次会话内存可用，刷新后会失效。 */
+  storage?: 'indexeddb' | 'memory';
 }
 
 export interface ChatMessage {

@@ -48,6 +48,9 @@ function createId(): string {
   return `chat-file-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** IndexedDB 不可用（如隐私模式、配额不足）时，提供本次会话的临时备份。 */
+const memoryRecords = new Map<string, ChatAttachmentRecord>();
+
 function isTextLike(attachment: ChatAttachment): boolean {
   const mime = attachment.mime.toLowerCase();
   const name = attachment.name.toLowerCase();
@@ -66,31 +69,61 @@ export const chatAttachmentStore = {
       blob: file,
       createdAt: new Date().toISOString(),
     };
-    await withStore('readwrite', (store) => store.put(record));
-    return {
+    const base = {
       id,
       name: file.name || id,
       mime: file.type || 'application/octet-stream',
       size: file.size,
       createdAt: record.createdAt,
     };
+
+    try {
+      await withStore('readwrite', (store) => store.put(record));
+      return { ...base, storage: 'indexeddb' as const };
+    } catch (error) {
+      memoryRecords.set(id, record);
+      console.warn('[attachments] IndexedDB unavailable, using memory fallback:', error);
+      return { ...base, storage: 'memory' as const };
+    }
   },
 
   async get(id: string): Promise<ChatAttachmentRecord | undefined> {
-    return withStore<ChatAttachmentRecord | undefined>('readonly', (store) => store.get(id));
+    const memory = memoryRecords.get(id);
+    if (memory) return memory;
+    try {
+      return await withStore<ChatAttachmentRecord | undefined>('readonly', (store) =>
+        store.get(id),
+      );
+    } catch {
+      return undefined;
+    }
   },
 
   async remove(id: string): Promise<void> {
-    await withStore('readwrite', (store) => store.delete(id));
+    memoryRecords.delete(id);
+    try {
+      await withStore('readwrite', (store) => store.delete(id));
+    } catch {
+      // Removing the pending item is still valid even if the fallback store was already unavailable.
+    }
   },
 
   async removeMany(ids: string[]): Promise<void> {
     for (const id of ids) {
-      await withStore('readwrite', (store) => store.delete(id));
+      memoryRecords.delete(id);
+    }
+    if (!ids.length) return;
+    try {
+      for (const id of ids) {
+        await withStore('readwrite', (store) => store.delete(id));
+      }
+    } catch {
+      // Metadata cleanup in app state is still valid; stale blobs will not be referenced.
     }
   },
 
   async clear(): Promise<void> {
+    memoryRecords.clear();
     await withStore('readwrite', (store) => store.clear());
   },
 };
