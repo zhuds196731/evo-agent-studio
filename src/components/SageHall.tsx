@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { AppState, Sage } from '../types';
 import Avatar from './Avatar';
 import BookReader from './BookReader';
+import { compressToAvatar } from '../utils/image';
 import {
   bookStore,
   fetchBookText,
@@ -47,6 +48,36 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
   const [overId, setOverId] = useState<string | null>(null);
 
   const active = state.sages.find((s) => s.id === activeId) ?? state.sages[0];
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  const patchSageAvatar = (sageId: string, avatarUrl?: string) => {
+    onUpdateState({
+      sages: state.sages.map((s) => (s.id === sageId ? { ...s, avatarUrl } : s)),
+    });
+  };
+
+  const handleAvatarChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      onToast('请选择图片文件');
+      return;
+    }
+    try {
+      const url = await compressToAvatar(file, 320);
+      if (draft?.id) {
+        setDraft({ ...draft, avatarUrl: url });
+      } else if (draft) {
+        setDraft({ ...draft, avatarUrl: url });
+      } else if (active) {
+        patchSageAvatar(active.id, url);
+      }
+      onToast('形象已更新');
+    } catch {
+      onToast('图片解析失败，请换一张试试');
+    }
+  };
 
   /** 拖拽排序：把 dragId 的卡片移动到 overId 位置，持久化到 state.sages */
   const reorder = (dragId: string, overId: string) => {
@@ -146,7 +177,7 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
                     ⠿
                   </span>
                   <span className="w-4 text-center text-[10px] text-slate-600">{idx + 1}</span>
-                  <Avatar name={s.name} emoji={s.emoji} accent={s.accent} size={30} />
+                  <Avatar name={s.name} url={s.avatarUrl} emoji={s.emoji} accent={s.accent} size={30} />
                   <div className="min-w-0 flex-1">
                     <span className="truncate text-sm text-slate-100">{s.name}</span>
                     <span className="ml-1.5 hidden text-[11px] text-slate-500 sm:inline">{s.school}</span>
@@ -201,6 +232,16 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
             <h3 className="text-sm font-semibold text-slate-200">
               {draft.id ? `编辑 · ${draft.name}` : '新建思想人物'}
             </h3>
+            <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void handleAvatarChange(e)} />
+            <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-ink-700/40 p-2">
+              <Avatar name={draft.name || '先哲'} url={draft.avatarUrl} emoji={draft.emoji} accent={draft.accent} size={52} ring />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-medium text-slate-200">人物形象</div>
+                <div className="mt-0.5 truncate text-[11px] text-slate-500">上传本地图，自动压缩保存；可用系统头像或其他人物形象</div>
+              </div>
+              <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => avatarInputRef.current?.click()}>上传</button>
+              {draft.avatarUrl && <button className="btn-ghost px-2 py-1 text-[11px]" onClick={() => setDraft({ ...draft, avatarUrl: undefined })}>还原</button>}
+            </div>
             <div className="grid grid-cols-2 gap-2">
               <Field label="姓名" value={draft.name} onChange={(v) => setDraft({ ...draft, name: v })} />
               <Field label="别号" value={draft.alias ?? ''} onChange={(v) => setDraft({ ...draft, alias: v })} />
@@ -252,12 +293,19 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
           </div>
         ) : active ? (
           <div className="space-y-4">
+            <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void handleAvatarChange(e)} />
             <div className="flex items-start gap-3">
-              <Avatar name={active.name} emoji={active.emoji} accent={active.accent} size={56} ring />
+              <Avatar name={active.name} url={active.avatarUrl} emoji={active.emoji} accent={active.accent} size={56} ring />
               <div className="flex-1">
                 <div className="text-base font-semibold text-slate-100">{active.name}</div>
                 <div className="text-[11px] text-slate-500">
                   {active.alias} · {active.era} · {active.school}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  <button className="btn-ghost px-2 py-0.5 text-[11px]" onClick={() => avatarInputRef.current?.click()}>换形象</button>
+                  {active.avatarUrl && (
+                    <button className="btn-ghost px-2 py-0.5 text-[11px]" onClick={() => patchSageAvatar(active.id, undefined)}>还原默认</button>
+                  )}
                 </div>
               </div>
               <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setDraft({ ...active })}>

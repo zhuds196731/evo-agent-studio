@@ -21,6 +21,17 @@ declare global {
         count?: number,
       ) => Promise<{ bars: import('./engine/tdxBridge').TdxBar[]; count: number }>;
     };
+    evoWeb?: {
+      searchNews?: (query: string) => Promise<{
+        refs?: {
+          title: string;
+          extract: string;
+          source?: string;
+          url?: string;
+          publishedAt?: string;
+        }[];
+      }>;
+    };
   }
 }
 

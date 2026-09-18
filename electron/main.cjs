@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, net } = require('electron');
 const fs = require('fs/promises');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -75,6 +75,66 @@ ipcMain.handle('evo:tdx:daily-bars', async (_event, payload) => {
     Number(payload?.count ?? 120),
   );
   return { bars, count: bars.length };
+});
+
+function decodeXmlText(value = '') {
+  return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+ipcMain.handle('evo:web:news-search', async (_event, payload) => {
+  const query = String(payload?.query ?? '').trim();
+  if (!query) return { refs: [] };
+
+  const url = `https://news.google.com/rss/search?hl=zh-CN&gl=CN&ceid=CN:zh-Hans&q=${encodeURIComponent(query)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 9000);
+
+  try {
+    const response = await net.fetch(url, { signal: controller.signal });
+    if (!response.ok) return { refs: [] };
+
+    const xml = await response.text();
+    const refs = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)]
+      .slice(0, 5)
+      .map((item) => {
+        const block = item[1];
+        const pick = (tag) => {
+          const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+          return match ? decodeXmlText(match[1]) : '';
+        };
+        const title = pick('title');
+        const description = pick('description');
+        const sourceTag = block.match(/<source[^>]*>([\s\S]*?)<\/source>/i);
+        const pubDate = pick('pubDate');
+        const parsedAt = pubDate ? new Date(pubDate) : null;
+        return {
+          title,
+          extract: (description || title).slice(0, 360),
+          source: sourceTag ? decodeXmlText(sourceTag[1]) : 'Google News',
+          url: pick('link'),
+          publishedAt: parsedAt && !Number.isNaN(parsedAt.getTime())
+            ? parsedAt.toLocaleString('zh-CN', { hour12: false, dateStyle: 'short', timeStyle: 'short' })
+            : '',
+        };
+      })
+      .filter((row) => row.title && row.extract);
+
+    return { refs };
+  } catch {
+    return { refs: [] };
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 app.on('window-all-closed', () => {

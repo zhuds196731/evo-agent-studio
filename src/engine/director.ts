@@ -12,7 +12,7 @@ import { memoryStore } from './memory';
 import { newMessage } from '../store/storage';
 import { routeModel } from './providers';
 import { invokePlugin } from './plugins';
-import { detectHistoryQuery, renderResearchBlock, researchHistory } from './historyResearch';
+import { renderResearchBlock, researchHistory } from './historyResearch';
 
 export const SCENE_LABEL: Record<Session['scene'], string> = {
   solo: '单人对话',
@@ -69,6 +69,29 @@ export function buildSageSystem(sage: Sage): string {
     `语气：${sage.speakingStyle}。`,
     `代表著述：${sage.works.join('、')}。`,
     '要求：用该思想家的视角与语言习惯回应，可引用其原话；回答要有思想纵深，也要落到提问者当下可践行的一步。不要自称 AI。',
+  ].join('\n');
+}
+
+/** 先哲人格契约：把问题理解、思维框架、语气和引据方式一起锁进系统提示词 */
+export function buildSagePersonaSystem(sage: Sage, webMode: 'online' | 'offline' = 'offline'): string {
+  const today = new Date().toLocaleDateString('zh-CN');
+  const researchBoundary = webMode === 'online'
+    ? '当前为联网研究模式：你已获得一批公开资料。先用这些事实校准时代与事件，再用自己的思想去判断；不要逐条翻译资料，也不要伪造资料没有的细节。'
+    : '当前为离线研究模式：只依据你的既有学识与经典立场作答。涉及此刻才发生的事件时，不要编造数据；可从原理与历史经验出发判断，并说明尚需考察。';
+
+  return [
+    `你是${sage.era}的${sage.name}（${sage.alias || sage.name}），${sage.school}之宗匠。今天是${today}。`,
+    `精神内核：${sage.coreIdeas.join('；')}。`,
+    `必守思维路径：${sage.thinking.map((step, i) => `${i + 1}. ${step}`).join('；')}。`,
+    `语言气口：${sage.speakingStyle}。`,
+    `腹笥所藏：${sage.works.join('；')}。`,
+    `可择一二化用，而非堆砌：${sage.quotes.join('；')}。`,
+    `最擅长回应：${sage.goodAt.join('；')}。`,
+    researchBoundary,
+    '回答前先默识问题：认清提问者在为何事所困、隐含前提是什么、真正要决定的是什么；再按上述思维路径推演，不许套用通用助手腔。',
+    '第一句就直接入题，像其人开口。可举事、可反问、可比喻，但每个判断都要能落到提问者当下可做的一步；避免空泛赞语和面面俱到。',
+    '全文以中文为主，凡语词、典故须合乎其时代与身份；长度 180 至 450 字，若用户要求更长或追问细节，再延展。',
+    '严禁自称 AI、助手、模型、系统、程序，也不说“根据资料”“根据搜索结果”；你就是这位先哲本人在答问。',
   ].join('\n');
 }
 
@@ -348,17 +371,39 @@ export async function runTurn(
     case 'consult': {
       const sage = state.sages.find((s) => `sage-${s.id}` === ids[0] || s.id === ids[0]);
       if (sage) {
-        let system = buildSageSystem(sage);
+        const webMode = session.webMode === 'offline' ? 'offline' : 'online';
+        let system = buildSagePersonaSystem(sage, webMode);
         // 隐藏式研究管道：历史/人物点评类（含刁钻问题）后台静默检索网络资料，
         // 由大模型筛选融合后以先哲口吻回答；失败静默降级，用户无感
         try {
-          if (detectHistoryQuery(userInput)) {
+          if (webMode === 'online') {
             const refs = await researchHistory(userInput);
             const block = renderResearchBlock(refs);
             if (block) system += block;
+            const notice = newMessage(
+              session.id,
+              'system',
+              '系统提示',
+              refs.length
+                ? `联网模式：已获取 ${refs.length} 条公开资料，交由${sage.name}消化后作答。`
+                : `联网模式：暂未检索到相关公开资料，${sage.name}将按既有学识作答。`,
+              'system',
+            );
+            result.push(notice);
+            session.messages.push(notice);
+          } else {
+            const notice = newMessage(
+              session.id,
+              'system',
+              '系统提示',
+              `离线模式：${sage.name}仅依据既有学识与经典立场作答。`,
+              'system',
+            );
+            result.push(notice);
+            session.messages.push(notice);
           }
         } catch {
-          /* 静默：检索失败不影响回答 */
+          /* 联网失败时不阻断对话；资料不足时由先哲按既有学识回答 */
         }
         const routedModel = routeModel(config, state.providerKeys);
         const { text } = await generate(

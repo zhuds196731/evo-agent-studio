@@ -66,6 +66,8 @@ export interface Sage {
   accent: string;
   emoji: string;
   builtin: boolean;
+  /** 用户上传或替换的先哲形象，保存为压缩后的 dataURL */
+  avatarUrl?: string;
 }
 
 export interface ChatAttachment {
@@ -112,6 +114,8 @@ export interface Session {
   updatedAt: number;
   /** 置顶的会话在侧栏排最前 */
   pinned?: boolean;
+  /** 先哲咨询回答模式：在线检索后综合，离线仅用模型知识 */
+  webMode?: 'online' | 'offline';
 }
 
 export type TurnPolicy = 'round-robin' | 'moderated' | 'free';
