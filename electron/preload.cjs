@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+contextBridge.exposeInMainWorld('evoNet', {
+  request: (input) => ipcRenderer.invoke('evo:net:request', input),
+});
+
 contextBridge.exposeInMainWorld('evoTdx', {
   readDefaultConfig: () => ipcRenderer.invoke('evo:tdx:read-default-config'),
   parseConfig: (config) => ipcRenderer.invoke('evo:tdx:parse-config', { config }),

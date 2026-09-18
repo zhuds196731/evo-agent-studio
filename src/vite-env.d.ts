@@ -7,6 +7,14 @@ declare module '*?raw' {
 
 declare global {
   interface Window {
+    evoNet?: {
+      request?: (input: {
+        url: string;
+        method?: 'GET' | 'POST';
+        headers?: Record<string, string>;
+        body?: string;
+      }) => Promise<{ ok: boolean; status: number; text: string }>;
+    };
     evoTdx?: {
       readDefaultConfig?: () => Promise<{ path: string; text: string } | null>;
       parseConfig?: (config: string) => Promise<import('./engine/tdxBridge').TdxParseResult>;

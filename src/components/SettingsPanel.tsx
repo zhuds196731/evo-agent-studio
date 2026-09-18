@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
-import type { AppState } from '../types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { AppState, ProviderPreset } from '../types';
 import { exportState, importState, resetState, saveState } from '../store/storage';
 import { tokenBudget, tokenMeter } from '../engine/token';
-import { BUILTIN_PROVIDERS, MULTIMEDIA_MODELS, mediaProviderOf, mediaModelsByType, routeModel, freeUsageToday, freeQuotaRemaining } from '../engine/providers';
+import { BUILTIN_PROVIDERS, MULTIMEDIA_MODELS, mediaProviderOf, mediaModelsByType, routeModel, freeUsageToday, freeQuotaRemaining, fetchProviderModels, modelsForProvider } from '../engine/providers';
 import { generate } from '../engine/llm';
 import HelpIcon from './HelpIcon';
 import TdxConfigEditor from './TdxConfigEditor';
@@ -20,6 +20,9 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
   const fileRef = useRef<HTMLInputElement>(null);
   const [showKey, setShowKey] = useState(false);
   const [providerQuery, setProviderQuery] = useState('');
+  const [fetchingModels, setFetchingModels] = useState<Record<string, string>>({});
+  const [modelFetchErrors, setModelFetchErrors] = useState<Record<string, string>>({});
+  const fetchTimers = useRef<Record<string, number>>({});
   const [testing, setTesting] = useState(false);
   const [tdxBusy, setTdxBusy] = useState(false);
   const [showTdxConfigEditor, setShowTdxConfigEditor] = useState(false);
@@ -40,8 +43,48 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
       p.baseUrl,
       p.region ?? '',
       ...p.models.map((m) => `${m.id} ${m.name} ${m.tags.join(' ')}`),
+      ...(state.dynamicModels?.[p.id]?.models ?? []).map((m) => `${m.id} ${m.name}`),
     ].join(' ').toLowerCase().includes(q));
   }, [providerQuery]);
+
+  useEffect(() => () => {
+    Object.values(fetchTimers.current).forEach((timer) => window.clearTimeout(timer));
+  }, []);
+
+  const fetchOfficialModels = async (provider: ProviderPreset, apiKey: string, silent = false) => {
+    const key = apiKey.trim();
+    if (!key) {
+      if (!silent) onToast(`请先填写 ${provider.name} API Key`);
+      return;
+    }
+    setFetchingModels((prev) => ({ ...prev, [provider.id]: '拉取中…' }));
+    setModelFetchErrors((prev) => ({ ...prev, [provider.id]: '' }));
+    try {
+      const models = await fetchProviderModels(provider, key);
+      onUpdateState({
+        dynamicModels: {
+          ...(state.dynamicModels ?? {}),
+          [provider.id]: { models, fetchedAt: new Date().toISOString(), source: 'official' },
+        },
+      });
+      setFetchingModels((prev) => ({ ...prev, [provider.id]: `${models.length} 个官方模型` }));
+      onToast(`${provider.name} 已拉取 ${models.length} 个官方模型`);
+    } catch (e) {
+      const message = (e as Error).message || '拉取失败';
+      setFetchingModels((prev) => ({ ...prev, [provider.id]: '拉取失败' }));
+      setModelFetchErrors((prev) => ({ ...prev, [provider.id]: message }));
+      if (!silent) onToast(`${provider.name} 官方模型拉取失败：${message}`);
+    }
+  };
+
+  const scheduleOfficialModels = (provider: ProviderPreset, apiKey: string) => {
+    const key = apiKey.trim();
+    if (fetchTimers.current[provider.id]) window.clearTimeout(fetchTimers.current[provider.id]);
+    if (key.length < 12 || (state.dynamicModels?.[provider.id]?.models.length ?? 0) > 0) return;
+    fetchTimers.current[provider.id] = window.setTimeout(() => {
+      void fetchOfficialModels(provider, key, true);
+    }, 900);
+  };
 
   const patchLlm = (patch: Partial<AppState['llm']>) =>
     onUpdateState({ llm: { ...state.llm, ...patch } });
@@ -222,11 +265,14 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                   className="input flex-1 text-[11px]"
                   type={showKey ? 'text' : 'password'}
                   value={state.providerKeys[activeProviderId] || ''}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     onUpdateState({
                       providerKeys: { ...state.providerKeys, [activeProviderId]: e.target.value },
-                    })
-                  }
+                    });
+                    const p = activeProvider;
+                    if (p) scheduleOfficialModels(p, e.target.value);
+                  }}
+                  onBlur={() => { const p = activeProvider; if (p) void fetchOfficialModels(p, state.providerKeys[activeProviderId] || '', true); }}
                   placeholder="在此填入 API Key（点 👁 可回看）"
                 />
                 <button
@@ -251,7 +297,7 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                   className="mt-1.5 text-[11px] text-royal-300 hover:underline"
                   onClick={() => {
                     const p = activeProvider;
-                    if (p) patchLlm({ selectedProviderId: p.id, baseUrl: p.baseUrl, model: p.models[0]?.id ?? state.llm.model });
+                    if (p) patchLlm({ selectedProviderId: p.id, baseUrl: p.baseUrl, model: modelsForProvider(p)[0]?.id ?? state.llm.model });
                   }}
                 >
                   选用 {activeProvider?.name} 作为当前对话模型 →
@@ -272,9 +318,11 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                   })
                 }
               >
-                {activeProvider?.models.map((model) => {
-                  const used = freeUsageToday(activeProvider.id, model.id);
-                  const remaining = freeQuotaRemaining(activeProvider, model);
+                {(activeProvider ? modelsForProvider(activeProvider) : []).map((model) => {
+                  const provider = activeProvider;
+                  if (!provider) return null;
+                  const used = freeUsageToday(provider.id, model.id);
+                  const remaining = freeQuotaRemaining(provider, model);
                   const price = model.isFree && model.freeQuotaDaily > 0
                     ? `免费 ${remaining}/${model.freeQuotaDaily}次/日${used > 0 ? `·已用${used}` : ''}`
                     : `${model.inputPerMillion}/${model.outputPerMillion} ¥/百万`;
@@ -324,19 +372,28 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
           <div className="max-h-[36rem] space-y-2 overflow-y-auto pr-1">
             {filteredProviders.map((provider, index) => {
               const selected = state.llm.selectedProviderId === provider.id;
-              const modelValue = selected && provider.models.some((m) => m.id === state.llm.model)
+              const providerModels = modelsForProvider(provider);
+              const catalog = state.dynamicModels?.[provider.id];
+              const modelValue = selected && providerModels.some((m) => m.id === state.llm.model)
                 ? state.llm.model
-                : provider.models[0]?.id ?? '';
+                : providerModels[0]?.id ?? '';
               return (
                 <div key={provider.id} className="rounded-xl border border-white/5 bg-ink-700/40 p-2.5">
                   <div className="mb-2 flex items-center gap-2">
                     <span className="w-5 text-center text-[10px] font-semibold text-slate-500">{index + 1}</span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-xs font-medium text-slate-100">{provider.name}</div>
-                      <div className="text-[10px] text-slate-500">{provider.models.length} 个模型 · {provider.region ?? '全球'}</div>
+                      <div className="text-[10px] text-slate-500">{providerModels.length} 个模型 · {provider.region ?? '全球'}{catalog ? ` · 官方拉取 ${new Date(catalog.fetchedAt).toLocaleString('zh-CN', { hour12: false })}` : ''}</div>
                     </div>
                     <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">{provider.apiProtocol}</span>
                     {state.providerKeys[provider.id] && <span className="text-[10px] text-jade-400">已配置</span>}
+                    <button
+                      className="btn-ghost shrink-0 px-2 py-0.5 text-[10px]"
+                      disabled={fetchingModels[provider.id] === '拉取中…'}
+                      onClick={() => void fetchOfficialModels(provider, state.providerKeys[provider.id] || '')}
+                    >
+                      {catalog ? '刷新官方' : '拉取官方'}
+                    </button>
                   </div>
                   <div className="mb-2 flex items-center gap-1.5">
                     <code className="min-w-0 flex-1 truncate rounded bg-black/25 px-2 py-1 text-[10px] text-royal-200">{provider.baseUrl}</code>
@@ -348,15 +405,24 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                     type={showKey ? 'text' : 'password'}
                     value={state.providerKeys[provider.id] || ''}
                     placeholder={`${provider.name} API Key`}
-                    onChange={(e) => onUpdateState({ providerKeys: { ...state.providerKeys, [provider.id]: e.target.value } })}
+                    onChange={(e) => {
+                      onUpdateState({ providerKeys: { ...state.providerKeys, [provider.id]: e.target.value } });
+                      scheduleOfficialModels(provider, e.target.value);
+                    }}
+                    onBlur={() => void fetchOfficialModels(provider, state.providerKeys[provider.id] || '', true)}
                   />
+                  {(fetchingModels[provider.id] || modelFetchErrors[provider.id]) && (
+                    <div className={`mb-2 rounded px-2 py-1 text-[10px] ${modelFetchErrors[provider.id] ? 'bg-rose-500/10 text-rose-300' : 'bg-royal-500/10 text-royal-200'}`}>
+                      {modelFetchErrors[provider.id] || fetchingModels[provider.id]}
+                    </div>
+                  )}
                   <div className="flex items-center gap-1.5">
                     <select
                       className="input min-w-0 flex-1 text-[11px]"
                       value={modelValue}
                       onChange={(e) => onUpdateState({ llm: { ...state.llm, enabled: true, provider: 'openai-compatible', selectedProviderId: provider.id, baseUrl: provider.baseUrl, model: e.target.value } })}
                     >
-                      {provider.models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                      {providerModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                     </select>
                     <button className="btn-ghost shrink-0 px-2 py-1 text-[10px]" onClick={() => onUpdateState({ llm: { ...state.llm, enabled: true, provider: 'openai-compatible', selectedProviderId: provider.id, baseUrl: provider.baseUrl, model: modelValue } })}>设为当前</button>
                   </div>

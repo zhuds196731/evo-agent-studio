@@ -4,6 +4,7 @@ import { ALPHASAGE_POSITIONS, LEGACY_ALPHASAGE_POSITION_IDS } from '../data/alph
 import { BUILTIN_SAGES } from '../data/sages';
 import { createDefaultTdxConfig, createTdxConfig, readSavedTdxConfig } from '../engine/tdxSettings';
 import { createSkillhubPlugins } from '../data/skillhub';
+import { clearDynamicModelRegistry, registerDynamicModelCatalog } from '../engine/providers';
 
 // 存储键沿用旧名以保护用户已有数据，软件显示名已改为 Self‑Evolving Agent
 const STORAGE_KEY = 'evo-agent-studio/v1';
@@ -123,6 +124,7 @@ export function createInitialState(): AppState {
     },
     activeSessionId: null,
     providerKeys: {},
+    dynamicModels: {},
     plugins: [...BUILTIN_PLUGINS, ...createSkillhubPlugins()],
     evolutionLogs: [],
     evolutionSuggestions: [],
@@ -167,6 +169,11 @@ export function loadState(): AppState {
     return {
       ...base,
       ...parsed,
+      dynamicModels: (() => {
+        const catalog = parsed.dynamicModels ?? {};
+        registerDynamicModelCatalog(catalog);
+        return catalog;
+      })(),
       // 预置岗位/先哲升级时，只补齐新增项，不覆盖用户已编辑的内容
       positions,
       // 先哲保留用户拖拽排序：以用户数据顺序为准，升级新增的内置先哲追加到末尾
@@ -239,6 +246,7 @@ export function saveState(state: AppState): void {
 
 export function resetState(): AppState {
   localStorage.removeItem(STORAGE_KEY);
+  clearDynamicModelRegistry();
   return createInitialState();
 }
 

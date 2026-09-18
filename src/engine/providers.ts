@@ -405,6 +405,94 @@ export const BUILTIN_PROVIDERS: ProviderPreset[] = [
     ],
   },
 ];
+/** 运行时官方模型目录；应用启动时从持久化状态回填 */
+const dynamicCatalogs = new Map<string, import('../types').ProviderModelCatalog>();
+
+export function registerDynamicModels(providerId: string, models: ModelPreset[]) {
+  if (!models.length) return;
+  dynamicCatalogs.set(providerId, { models, fetchedAt: new Date().toISOString(), source: 'official' });
+}
+
+export function registerDynamicModelCatalog(catalog: Record<string, import('../types').ProviderModelCatalog> = {}) {
+  Object.entries(catalog).forEach(([providerId, item]) => {
+    if (item?.models?.length) dynamicCatalogs.set(providerId, item);
+  });
+}
+
+export function clearDynamicModelRegistry() {
+  dynamicCatalogs.clear();
+}
+
+/** 预置模型保底 + 官方动态目录；同 ID 以官方模型优先 */
+export function modelsForProvider(provider: ProviderPreset): ModelPreset[] {
+  const dynamic = dynamicCatalogs.get(provider.id)?.models ?? [];
+  const dynamicIds = new Set(dynamic.map((m) => m.id));
+  return [...dynamic, ...provider.models.filter((m) => !dynamicIds.has(m.id))];
+}
+
+async function requestProviderModels(url: string, headers: Record<string, string>): Promise<string> {
+  const bridge = (window as any).evoNet as { request?: (input: { url: string; method?: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; text: string }> } | undefined;
+  if (bridge?.request) {
+    const result = await bridge.request({ url, method: 'GET', headers });
+    if (!result.ok) throw new Error(`官方模型接口返回 ${result.status}：${result.text.slice(0, 180)}`);
+    return result.text;
+  }
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`官方模型接口返回 ${res.status}：${detail.slice(0, 180)}`);
+  }
+  return res.text();
+}
+
+/** 拉取供应商官方模型目录；支持 OpenAI 兼容、Anthropic、Google 三种返回 */
+export async function fetchProviderModels(provider: ProviderPreset, apiKey: string): Promise<ModelPreset[]> {
+  const key = apiKey.trim();
+  if (!key) throw new Error('请先填写 API Key');
+  const base = provider.baseUrl.replace(/\/$/, '');
+  const url = provider.apiProtocol === 'google' ? `${base}/models?key=${encodeURIComponent(key)}` : `${base}/models`;
+  const headers: Record<string, string> = provider.apiProtocol === 'google' ? {} : { Authorization: `Bearer ${key}` };
+  if (provider.apiProtocol === 'anthropic') {
+    headers['x-api-key'] = key;
+    headers['anthropic-version'] = '2023-06-01';
+    headers['anthropic-dangerous-direct-browser-access'] = 'true';
+  }
+  const text = await requestProviderModels(url, headers);
+  const payload = JSON.parse(text);
+  const rows = Array.isArray(payload) ? payload : payload.data ?? payload.models ?? payload.result?.models ?? [];
+  const models = normalizeOfficialModels(rows);
+  if (!models.length) throw new Error('官方接口未返回可用模型');
+  registerDynamicModels(provider.id, models);
+  return models;
+}
+
+function normalizeOfficialModels(rows: unknown[]): ModelPreset[] {
+  const models: ModelPreset[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const item = typeof row === 'string' ? { id: row } : row as Record<string, any>;
+    const rawId = String(item.id ?? item.model ?? item.name ?? '').trim();
+    if (!rawId) continue;
+    if (Array.isArray(item.supportedGenerationMethods) && !item.supportedGenerationMethods.includes('generateContent')) continue;
+    const id = rawId.replace(/^models\//, '');
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const displayName = String(item.displayName ?? item.display_name ?? item.name ?? id);
+    const contextWindow = Number(item.context_window ?? item.contextWindow ?? item.context_length ?? item.max_context_window_tokens ?? item.inputTokenLimit ?? item.input_token_limit ?? item.max_input_tokens ?? 32768);
+    models.push({
+      id,
+      name: displayName === id ? id : `${displayName}（${id}）`,
+      contextWindow: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : 32768,
+      isFree: /(^|[-/:])free([-:.]|$)/i.test(id),
+      freeQuotaDaily: 0,
+      inputPerMillion: 2,
+      outputPerMillion: 8,
+      tags: ['官方', '动态'],
+      dynamic: true,
+    });
+  }
+  return models.sort((a, b) => a.id.localeCompare(b.id));
+}
 
 /** 每日免费额度使用计数（localStorage） */
 const FREE_USAGE_KEY = 'evo/free-usage';
@@ -482,7 +570,7 @@ export function routeModel(
       const key = providerKeys[provider.id] || '';
       if (key) {
         if (config.preferFree) {
-          const freeModel = provider.models
+          const freeModel = modelsForProvider(provider)
             .filter((m) => m.isFree)
             .sort((a, b) => freeQuotaRemaining(provider, b) - freeQuotaRemaining(provider, a))[0];
           if (freeModel && freeQuotaRemaining(provider, freeModel) > 0) {
@@ -495,7 +583,8 @@ export function routeModel(
             };
           }
         }
-        const model = provider.models.find((m) => m.id === config.model) ?? provider.models[0];
+        const providerModels = modelsForProvider(provider);
+        const model = providerModels.find((m) => m.id === config.model) ?? providerModels[0];
         if (model) {
           return { provider, model, apiKey: key, isFree: false, remainingQuota: 0 };
         }
@@ -508,7 +597,7 @@ export function routeModel(
     for (const provider of BUILTIN_PROVIDERS) {
       const key = providerKeys[provider.id] || '';
       if (!key) continue;
-      for (const model of provider.models) {
+      for (const model of modelsForProvider(provider)) {
         if (!model.isFree) continue;
         const remaining = freeQuotaRemaining(provider, model);
         if (remaining > 0) {
@@ -525,7 +614,8 @@ export function routeModel(
   if (config.apiKey && config.baseUrl) {
     const provider = BUILTIN_PROVIDERS.find((p) => p.baseUrl === config.baseUrl);
     if (provider) {
-      const model = provider.models.find((m) => m.id === config.model) ?? provider.models[0];
+      const providerModels = modelsForProvider(provider);
+      const model = providerModels.find((m) => m.id === config.model) ?? providerModels[0];
       if (model) {
         return {
           provider,

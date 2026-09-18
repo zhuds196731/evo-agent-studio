@@ -227,6 +227,8 @@ export interface MediaModelPreset {
   /** 能力说明 */
   notes: string;
   tags: string[];
+  /** 官方模型目录动态拉取项 */
+  dynamic?: boolean;
   /** 模型实际的 API Base URL（可与聊天供应商不同） */
   baseUrl: string;
   /** 申请 API Key 的入口 */
@@ -244,6 +246,12 @@ export interface MediaProviderPreset {
 }
 
 /** 多媒体模型设置：用户在设置中心一次性配置，前端输入需求时自动匹配 */
+/** 供应商官方 /models 拉取结果，仅保存在本机 */
+export interface ProviderModelCatalog {
+  models: ModelPreset[];
+  fetchedAt: string;
+  source: 'official';
+}
 export interface MediaSettings {
   /** 手动锁定的绘图模型（不设置则自动匹配） */
   imageModelId?: string;
@@ -279,6 +287,8 @@ export interface ModelPreset {
   outputPerMillion: number;
   /** 适合场景标签 */
   tags: string[];
+  /** 从官方模型目录动态拉取的模型 */
+  dynamic?: boolean;
 }
 
 /** 插件（工具）：智能体可调用的能力 */
@@ -387,6 +397,8 @@ export interface AppState {
   activeSessionId: string | null;
   /** 用户自定义 provider API Keys（provider id → key） */
   providerKeys: Record<string, string>;
+  /** 每个供应商从官方 /models 接口拉取的模型目录 */
+  dynamicModels: Record<string, ProviderModelCatalog>;
   /** 插件注册表 */
   plugins: Plugin[];
   /** 进化日志 */

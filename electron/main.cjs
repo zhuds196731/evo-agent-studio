@@ -8,10 +8,6 @@ const DEFAULT_TDX_CONFIG_PATHS = [
   'D:\\我的专用灵动版V1.21\\Connect.cfg',
 ].filter(Boolean);
 
-/**
- * 桌面端外壳：直接加载 vite 构建产物 dist/index.html。
- * 数据仍存放在用户目录（localStorage），与网页版、移动端共用同一份逻辑。
- */
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -41,6 +37,24 @@ app.whenReady().then(createWindow);
 async function loadTdxBridge() {
   return import(pathToFileURL(path.join(__dirname, '..', 'vite.tdxPlugin.mjs')).href);
 }
+
+ipcMain.handle('evo:net:request', async (_event, payload) => {
+  const url = String(payload?.url ?? '');
+  if (!/^https?:\/\//i.test(url)) {
+    return { ok: false, status: 0, text: 'Only HTTP/HTTPS requests are supported.' };
+  }
+
+  try {
+    const response = await net.fetch(url, {
+      method: payload?.method === 'POST' ? 'POST' : 'GET',
+      headers: payload?.headers ?? {},
+      signal: AbortSignal.timeout(15000),
+    });
+    return { ok: response.ok, status: response.status, text: await response.text() };
+  } catch (error) {
+    return { ok: false, status: 0, text: error.message || 'Network request failed.' };
+  }
+});
 
 ipcMain.handle('evo:tdx:read-default-config', async () => {
   for (const candidate of DEFAULT_TDX_CONFIG_PATHS) {
