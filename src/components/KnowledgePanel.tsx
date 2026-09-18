@@ -16,7 +16,7 @@ interface Props {
 
 export default function KnowledgePanel({ state, onToast }: Props) {
   const [tick, setTick] = useState(0);
-  const [mode, setMode] = useState<'files' | 'graph'>('files');
+  const [mode, setMode] = useState<'files' | 'graph'>('graph');
   const refresh = () => setTick((t) => t + 1);
 
   const categories = knowledgeStore.categories();
@@ -79,11 +79,25 @@ export default function KnowledgePanel({ state, onToast }: Props) {
 
   if (mode === 'graph') {
     return (
-      <div className="relative h-full">
+      <div
+        className="relative h-full"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setMode('files');
+        }}
+      >
         <KnowledgeGraph3D data={graphData} />
         <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-white/10 bg-black/45 p-1 backdrop-blur">
-          <button className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-slate-100" onClick={() => setMode('files')}>文件列表</button>
+          <button
+            className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-slate-100 transition hover:bg-white/15"
+            onClick={() => setMode('files')}
+          >
+            ← 文件列表
+          </button>
           <button className="rounded-lg bg-royal-500 px-3 py-1.5 text-xs text-white">三维图谱</button>
+        </div>
+        <div className="pointer-events-none absolute bottom-20 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-white/10 bg-black/35 px-3 py-1 text-[11px] text-slate-300 backdrop-blur">
+          鼠标右键可切换文件列表
         </div>
       </div>
     );
@@ -156,7 +170,12 @@ export default function KnowledgePanel({ state, onToast }: Props) {
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <div className="mr-1 flex items-center gap-1 rounded-lg border border-white/10 bg-ink-700/60 p-1">
             <button className="rounded-md bg-royal-500 px-2.5 py-1 text-xs text-white" onClick={() => setMode('files')}>文件列表</button>
-            <button className="rounded-md px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10" onClick={() => setMode('graph')}>三维图谱</button>
+            <button
+              className="rounded-md px-2.5 py-1 text-xs text-slate-300 transition hover:bg-white/10"
+              onClick={() => setMode('graph')}
+            >
+              三维图谱 →
+            </button>
           </div>
           <h3 className="text-sm font-semibold text-slate-200">
             {categories.find((c) => c.id === activeCat)?.name ?? '知识库'}
