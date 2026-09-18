@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AppState, ChatMessage, LlmConfig, MediaModelType, SceneType, Session } from '../types';
+import type { AppState, ChatAttachment, ChatMessage, LlmConfig, MediaModelType, SceneType, Session } from '../types';
 import Avatar from './Avatar';
 import { MULTIMEDIA_MODELS, routeModel } from '../engine/providers';
 import { generateImage, generateVideo, matchMediaModel, type MediaMatch } from '../engine/media';
@@ -16,6 +16,14 @@ import {
 import { newMessage, newSession } from '../store/storage';
 import { downloadSessionMarkdown } from '../engine/sessionExport';
 import LlmSetupModal from './LlmSetupModal';
+import {
+  attachmentEmoji,
+  attachmentTypeLabel,
+  buildAttachmentContext,
+  chatAttachmentStore,
+  openAttachment,
+} from '../engine/chatAttachments';
+import { formatBytes } from '../engine/knowledge';
 
 interface Props {
   state: AppState;
@@ -87,6 +95,9 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   );
   const [showLoaded, setShowLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
 
   useEffect(() => {
     if (initialScene) setScene(initialScene);
@@ -290,25 +301,33 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
   /** 修改已发送的提示词：载入输入框，发送后原消息原地更新 */
   const startEditMessage = (m: ChatMessage) => {
     setDraft(m.content);
+    setPendingAttachments(m.attachments ?? []);
     setEditing({ id: m.id });
   };
 
-  /** 删除已发送的提示词 */
-  const deleteMessage = (id: string) => {
-    if (!active || !window.confirm('删除这条提示词？删除后不可恢复。')) return;
+  const deleteMessage = async (id: string) => {
+    if (!active || !window.confirm('\u5220\u9664\u8fd9\u6761\u63d0\u793a\u8bcd\uff1f\u5220\u9664\u540e\u4e0d\u53ef\u6062\u590d\u3002')) return;
+    const target = active.messages.find((m) => m.id === id);
     onUpdateState({
       sessions: state.sessions.map((s) =>
         s.id === active.id ? { ...s, messages: s.messages.filter((m) => m.id !== id) } : s,
       ),
     });
+    if (target?.attachments?.length) {
+      try {
+        await chatAttachmentStore.removeMany(target.attachments.map((item) => item.id));
+      } catch {
+        onToast('\u6d88\u606f\u5df2\u5220\u9664\uff0c\u4f46\u90e8\u5206\u9644\u4ef6\u7f13\u5b58\u6e05\u7406\u5931\u8d25');
+      }
+    }
     if (editing?.id === id) {
       setEditing(null);
       setDraft('');
+      setPendingAttachments([]);
     }
-    onToast('已删除该提示词');
+    onToast('\u5df2\u5220\u9664\u8be5\u63d0\u793a\u8bcd');
   };
 
-  /** 暂停暂存当前输入的提示词 */
   const stashDraft = () => {
     const text = draft.trim();
     if (!text || !active) return;
@@ -337,16 +356,60 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     setStash(items);
   };
 
+  const addAttachmentFiles = async (fileList: FileList | File[] | null) => {
+    if (!fileList?.length || attachmentBusy) return;
+    setAttachmentBusy(true);
+    try {
+      const added: ChatAttachment[] = [];
+      const failed: string[] = [];
+      for (const file of Array.from(fileList)) {
+        try {
+          added.push(await chatAttachmentStore.put(file));
+        } catch {
+          failed.push(file.name);
+        }
+      }
+      if (added.length) setPendingAttachments((prev) => [...prev, ...added]);
+      if (failed.length) onToast(`\u9644\u4ef6\u4fdd\u5b58\u5931\u8d25\uff1a${failed.join('\u3001')}`);
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  const removePendingAttachment = async (id: string) => {
+    setPendingAttachments((prev) => prev.filter((item) => item.id !== id));
+    try {
+      await chatAttachmentStore.remove(id);
+    } catch {
+      onToast('\u9644\u4ef6\u79fb\u9664\u5931\u8d25\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9');
+    }
+  };
+
   const submitMessage = async (
     text: string,
-    overrides?: { llm: LlmConfig; providerKeys: Record<string, string> },
+    overrides?: {
+      llm?: LlmConfig;
+      providerKeys?: Record<string, string>;
+      attachments?: ChatAttachment[];
+    },
   ) => {
     if (!active || busy) return;
-    const runState = overrides
-      ? { ...state, llm: overrides.llm, providerKeys: overrides.providerKeys }
-      : state;
+    const runState =
+      overrides?.llm || overrides?.providerKeys
+        ? {
+            ...state,
+            llm: overrides.llm ?? state.llm,
+            providerKeys: overrides.providerKeys ?? state.providerKeys,
+          }
+        : state;
+    const attachments = overrides?.attachments ?? [];
     const session = { ...active, messages: [...active.messages] };
-    const userMsg = newMessage(session.id, 'me', '我', text, 'user');
+    const attachmentContext = await buildAttachmentContext(attachments);
+    const promptText = [text, attachmentContext].filter(Boolean).join('\n\n');
+    const userMsg = {
+      ...newMessage(session.id, 'me', '\u6211', text || '\uff08\u4e0a\u4f20\u9644\u4ef6\uff09', 'user'),
+      ...(attachments.length ? { attachments } : {}),
+    };
     session.messages.push(userMsg);
 
     onUpdateState({
@@ -356,14 +419,14 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     setDraft('');
     setBusy(true);
     try {
-      await runTurn(runState, session, text);
+      await runTurn(runState, session, promptText || '\u8bf7\u9605\u8bfb\u5e76\u5206\u6790\u4e0a\u4f20\u7684\u9644\u4ef6\u3002');
       onUpdateState({
         sessions: runState.sessions.map((s) => (s.id === session.id ? { ...session } : s)),
         activeSessionId: session.id,
       });
     } catch (e) {
-      console.error('[session] 本轮生成异常：', e);
-      onToast(`本轮生成失败：${(e as Error)?.message ?? '请重试'}`);
+      console.error('[session] \u672c\u8f6e\u751f\u6210\u5f02\u5e38\uff1a', e);
+      onToast(`\u672c\u8f6e\u751f\u6210\u5931\u8d25\uff1a${(e as Error)?.message ?? '\u8bf7\u91cd\u8bd5'}`);
     } finally {
       setBusy(false);
     }
@@ -371,17 +434,25 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || !active || busy) return;
+    if ((!text && !pendingAttachments.length) || !active || busy || attachmentBusy) return;
     if (voice.listening) voice.stop();
 
     if (editing) {
+      const attachments = pendingAttachments;
       onUpdateState({
         sessions: state.sessions.map((s) =>
           s.id === active.id
             ? {
                 ...s,
                 messages: s.messages.map((m) =>
-                  m.id === editing.id ? { ...m, content: text, ts: Date.now() } : m,
+                  m.id === editing.id
+                    ? {
+                        ...m,
+                        content: text,
+                        ts: Date.now(),
+                        attachments: attachments.length ? attachments : undefined,
+                      }
+                    : m,
                 ),
               }
             : s,
@@ -389,24 +460,32 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
       });
       setEditing(null);
       setDraft('');
-      onToast('已保存对提示词的修改');
+      setPendingAttachments([]);
+      onToast('\u5df2\u4fdd\u5b58\u5bf9\u63d0\u793a\u8bcd\u7684\u4fee\u6539');
       return;
     }
 
+    const outgoingText = text || '\u8bf7\u9605\u8bfb\u5e76\u5206\u6790\u4e0a\u4f20\u7684\u9644\u4ef6\u3002';
+
     if (!hasModel) {
-      setPendingPrompt(text);
+      const attachmentContext = await buildAttachmentContext(pendingAttachments);
+      setPendingPrompt([outgoingText, attachmentContext].filter(Boolean).join('\n\n'));
       setShowModelSetup(true);
       return;
     }
 
-    await submitMessage(text);
+    const attachments = pendingAttachments;
+    setPendingAttachments([]);
+    await submitMessage(outgoingText, { attachments });
   };
 
   const handleModelConfigured = (llm: LlmConfig, providerKeys: Record<string, string>) => {
     setShowModelSetup(false);
     const text = pendingPrompt;
+    const attachments = pendingAttachments;
     setPendingPrompt(null);
-    if (text) void submitMessage(text, { llm, providerKeys });
+    setPendingAttachments([]);
+    if (text) void submitMessage(text, { llm, providerKeys, attachments });
   };
 
   const speakerInfo = (id: string) => {
@@ -645,6 +724,26 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                             m.content
                           )}
                         </div>
+                          {m.attachments?.length ? (
+                            <div className="mt-2 space-y-1 border-t border-white/10 pt-2">
+                              {m.attachments.map((a) => (
+                                <button
+                                  key={a.id}
+                                  className="flex w-full min-w-0 items-center gap-2 rounded-md bg-black/10 px-2 py-1.5 text-left text-[11px] transition hover:bg-black/20"
+                                  title={`\u6253\u5f00\u6216\u4e0b\u8f7d\uff1a${a.name}`}
+                                  onClick={() => {
+                                    void openAttachment(a).catch(() => onToast('\u9644\u4ef6\u5df2\u4e0d\u5b58\u5728\u6216\u8bfb\u53d6\u5931\u8d25'));
+                                  }}
+                                >
+                                  <span aria-hidden="true">{attachmentEmoji(a)}</span>
+                                  <span className="min-w-0 flex-1 truncate font-medium">{a.name}</span>
+                                  <span className="shrink-0 text-slate-500">
+                                    {attachmentTypeLabel(a)} ? {formatBytes(a.size)}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
                         {/* 悬停操作：所有消息可复制；自己的提示词可修改/删除 */}
                         <div
                           className={`mt-0.5 flex items-center gap-2 opacity-0 transition group-hover:opacity-100 ${
@@ -851,6 +950,35 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                   ))}
                 </div>
               )}
+              {pendingAttachments.length > 0 && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-royal-500/25 bg-royal-500/10 px-2.5 py-2 text-[11px]">
+                  {pendingAttachments.map((a) => (
+                    <span
+                      key={a.id}
+                      className="flex max-w-full items-center gap-1.5 rounded-md bg-white/10 px-2 py-1 text-slate-200"
+                    >
+                      <span aria-hidden="true">{attachmentEmoji(a)}</span>
+                      <button
+                        className="max-w-[220px] truncate hover:text-royal-300"
+                        title={`${a.name}\n${attachmentTypeLabel(a)} \u00b7 ${formatBytes(a.size)}\n\u70b9\u51fb\u6253\u5f00\u6216\u4e0b\u8f7d`}
+                        onClick={() => {
+                          void openAttachment(a).catch(() => onToast('\u9644\u4ef6\u8bfb\u53d6\u5931\u8d25'));
+                        }}
+                      >
+                        {a.name}
+                      </button>
+                      <button
+                        className="text-slate-500 transition hover:text-rose-300"
+                        title="\u79fb\u9664\u9644\u4ef6"
+                        onClick={() => void removePendingAttachment(a.id)}
+                      >
+                        ?
+                      </button>
+                    </span>
+                  ))}
+                  {attachmentBusy && <span className="text-slate-400">\u6b63\u5728\u4fdd\u5b58\u9644\u4ef6\u2026</span>}
+                </div>
+              )}
               <div className="mb-2 flex items-center gap-3 text-lg text-slate-400">
                 <button title="生成图片（输入描述后点生成）" onClick={() => openMediaBar('image')}>
                   🎨
@@ -858,7 +986,23 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                 <button title="生成视频（输入描述后点生成）" onClick={() => openMediaBar('video')}>
                   🎬
                 </button>
-                <span title="附件（见知识库）">📎</span>
+                                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    void addAttachmentFiles(event.target.files);
+                    event.target.value = '';
+                  }}
+                />
+                <button
+                  title="\u4e0a\u4f20\u9644\u4ef6\uff08\u4e0d\u9650\u6587\u4ef6\u7c7b\u578b\uff0c\u53ef\u591a\u9009\uff09"
+                  onClick={() => attachmentInputRef.current?.click()}
+                  className="transition hover:text-royal-300"
+                >
+                  ??
+                </button>
                 <button
                   title={voice.supported ? (voice.listening ? '停止语音输入' : '语音输入（中文识别）') : '当前浏览器不支持语音输入，请用 Chrome/Edge'}
                   onClick={() => voice.toggle(draft)}

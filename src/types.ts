@@ -68,6 +68,14 @@ export interface Sage {
   builtin: boolean;
 }
 
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: string;
+}
+
 export interface ChatMessage {
   id: string;
   sessionId: string;
@@ -77,6 +85,7 @@ export interface ChatMessage {
   content: string;
   ts: number;
   kind: 'text' | 'image' | 'notice';
+  attachments?: ChatAttachment[];
   /** 小组对小组场景下标记所属阵营 */
   side?: 'A' | 'B' | 'none';
 }
