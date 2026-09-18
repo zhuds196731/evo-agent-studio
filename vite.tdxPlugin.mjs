@@ -65,9 +65,10 @@ function hostListFrom(section, primaryId) {
   const total = Number(section?.HOSTNUM ?? 0) || 0;
   const hosts = [];
   for (let i = 1; i <= Math.min(total, 128); i += 1) {
-    const name = section?.[`HOSTNAME${i}`] ?? '';
-    const address = section?.[`IPADDRESS${i}`] ?? '';
-    const port = Number(section?.[`PORT${i}`] ?? 0);
+    const suffix = String(i).padStart(2, '0');
+    const name = section?.[`HOSTNAME${suffix}`] ?? section?.[`HOSTNAME${i}`] ?? '';
+    const address = section?.[`IPADDRESS${suffix}`] ?? section?.[`IPADDRESS${i}`] ?? '';
+    const port = Number(section?.[`PORT${suffix}`] ?? section?.[`PORT${i}`] ?? 0);
     if (!address || !Number.isInteger(port) || port < 1 || port > 65535) continue;
     hosts.push({ id: i, name, address, port, primary: primaryId === i });
   }

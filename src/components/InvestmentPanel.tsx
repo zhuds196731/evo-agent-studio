@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AlphaSageAuditEvent,
   AlphaSageDecision,
@@ -17,7 +17,10 @@ import {
 import { fetchAlphaSageDataset } from '../engine/alphasageData';
 import MarketMonitorPanel from './MarketMonitorPanel';
 import InvestmentAiPanel from './InvestmentAiPanel';
+import TdxConfigEditor from './TdxConfigEditor';
 import type { AlphaSageDataset, AlphaSageLayerKey } from '../engine/alphasageData';
+import defaultTdxConfig from '../../public/tdx/Connect.default.cfg?raw';
+import { clearSavedTdxConfig, readSavedTdxConfig, writeSavedTdxConfig } from '../engine/tdxSettings';
 import {
   fetchTdxDailyBars,
   parseTdxConfig,
@@ -82,7 +85,42 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
   const [tdxBest, setTdxBest] = useState<TdxProbeResult | null>(null);
   const [tdxBusy, setTdxBusy] = useState(false);
   const [tdxMessage, setTdxMessage] = useState<string | null>(null);
+  const [showTdxConfigEditor, setShowTdxConfigEditor] = useState(false);
+  const [tdxConfigSource, setTdxConfigSource] = useState<'default' | 'custom' | 'tdx'>('default');
+  const [tdxConfigPath, setTdxConfigPath] = useState<string | null>(null);
   const fetchRequestId = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const saved = readSavedTdxConfig();
+    if (saved) {
+      setTdxConfigText(saved);
+      setTdxConfigSource('custom');
+      return () => { cancelled = true; };
+    }
+    const native = window.evoTdx?.readDefaultConfig?.();
+    if (native) {
+      native
+        .then((result) => {
+          if (cancelled) return;
+          if (result?.text) {
+            setTdxConfigText(result.text);
+            setTdxConfigPath(result.path);
+            setTdxConfigSource('tdx');
+          } else {
+            setTdxConfigText(defaultTdxConfig);
+            setTdxConfigSource('default');
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setTdxConfigText(defaultTdxConfig);
+        });
+    } else {
+      setTdxConfigText(defaultTdxConfig);
+      setTdxConfigSource('default');
+    }
+    return () => { cancelled = true; };
+  }, []);
 
   const targetSecid = useMemo(() => {
     const code = /(\d{6})/.exec(draft.target)?.[1] ?? '600519';
@@ -166,6 +204,23 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
     } finally {
       setTdxBusy(false);
     }
+  };
+
+  const saveTdxConfig = (config: string) => {
+    writeSavedTdxConfig(config);
+    setTdxConfigText(config);
+    setTdxConfigSource('custom');
+    setShowTdxConfigEditor(false);
+    setTdxMessage('配置已保存，下一步可点击「连接行情源」验证。');
+    onToast('通达信配置已保存');
+  };
+
+  const restoreTdxDefaultConfig = () => {
+    clearSavedTdxConfig();
+    setTdxConfigText(defaultTdxConfig);
+    setTdxConfigSource('default');
+    setShowTdxConfigEditor(false);
+    setTdxMessage('已恢复内置默认行情源配置。');
   };
 
   const runPipeline = () => {
@@ -353,32 +408,28 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
           </div>
 
           <details className="mt-4 rounded-xl border border-white/5 bg-ink-700/35 p-3" open={tdxOpen} onToggle={(event) => setTdxOpen((event.target as HTMLDetailsElement).open)}>
-            <summary className="cursor-pointer text-xs font-medium text-slate-300">通达信行情源（只读，不登录）</summary>
+            <summary className="cursor-pointer text-xs font-medium text-slate-300">通达信行情源（默认已配置）</summary>
             <div className="mt-3 space-y-3">
-              <div className="rounded-lg border border-amber-500/15 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-4 text-amber-200">
-                仅解析行情/资讯主站并读取日 K。配置里的账号、保存密码、交易登录信息不会被读取或提交。
+              <div className="rounded-lg border border-jade-500/15 bg-jade-500/10 px-2.5 py-2 text-[10px] leading-4 text-jade-200">
+                已按默认配置就绪：只解析行情/资讯主站并读取日 K。配置里的账号、保存密码、交易登录信息不会被读取或提交。
               </div>
-              <label className="block">
-                <span className="mb-1 block text-[11px] text-slate-400">配置文件</span>
-                <input
-                  type="file"
-                  accept=".ini,.txt,.cfg"
-                  className="input text-xs"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void readTdxSource(file);
-                  }}
-                />
-              </label>
-              <textarea
-                className="input min-h-[72px] resize-y font-mono text-[10px]"
-                value={tdxConfigText}
-                onChange={(event) => setTdxConfigText(event.target.value)}
-                placeholder="也可粘贴 TDX 配置 INI 内容；仅保留在当前页面输入中"
-              />
+              <div className="rounded-lg border border-white/5 bg-ink-800/45 p-2.5 text-[10px] leading-4 text-slate-400">
+                <div className="font-medium text-slate-200">当前配置来源</div>
+                <div className="mt-1">
+                  {tdxConfigSource === 'tdx'
+                    ? `本机通达信配置${tdxConfigPath ? `：${tdxConfigPath}` : ''}`
+                    : tdxConfigSource === 'custom'
+                      ? '自定义配置（保存在本应用中）'
+                      : '内置默认配置'}
+                </div>
+                <div className="mt-1">连接时会自动探测可用主站，不依赖 PrimaryHost 一定可用。</div>
+              </div>
               <div className="flex gap-2">
-                <button className="btn-ghost flex-1 text-xs" onClick={() => void readTdxSource()} disabled={tdxBusy}>
-                  {tdxBusy ? '读取中...' : '探测并读取日 K'}
+                <button className="btn-ghost text-xs" onClick={() => setShowTdxConfigEditor(true)}>
+                  修改配置
+                </button>
+                <button className="btn-royal flex-1 text-xs" onClick={() => void readTdxSource()} disabled={tdxBusy}>
+                  {tdxBusy ? '连接中...' : '连接行情源'}
                 </button>
               </div>
               {tdxMessage && <div className="text-[10px] leading-4 text-slate-400">{tdxMessage}</div>}
@@ -515,6 +566,14 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
           </div>
         </div>
       </section>
+      <TdxConfigEditor
+        open={showTdxConfigEditor}
+        config={tdxConfigText}
+        busy={tdxBusy}
+        onClose={() => setShowTdxConfigEditor(false)}
+        onSave={saveTdxConfig}
+        onRestoreDefault={restoreTdxDefaultConfig}
+      />
     </div>
   );
 }

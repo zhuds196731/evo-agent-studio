@@ -1,5 +1,11 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const fs = require('fs/promises');
 const path = require('path');
+
+const DEFAULT_TDX_CONFIG_PATHS = [
+  process.env.EVO_TDX_CONFIG,
+  'D:\\我的专用灵动版V1.21\\Connect.cfg',
+].filter(Boolean);
 
 /**
  * 桌面端外壳：直接加载 vite 构建产物 dist/index.html。
@@ -17,6 +23,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
     },
   });
 
@@ -29,6 +36,18 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
+
+ipcMain.handle('evo:tdx:read-default-config', async () => {
+  for (const candidate of DEFAULT_TDX_CONFIG_PATHS) {
+    try {
+      const bytes = await fs.readFile(candidate);
+      return { path: candidate, text: new TextDecoder('gbk').decode(bytes) };
+    } catch {
+      // Try the next known location.
+    }
+  }
+  return null;
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
