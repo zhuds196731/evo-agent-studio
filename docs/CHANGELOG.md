@@ -4,6 +4,12 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.2] - 2026-09-19
+
+### Fixed
+
+- 修复 Electron 桌面版中公共图片使用网站根路径导致的工具箱头像、应用图标与 Logo 不显示。
+
 ## [1.0.1] - 2026-09-19
 
 ### Changed
