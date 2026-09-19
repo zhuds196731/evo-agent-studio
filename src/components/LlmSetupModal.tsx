@@ -18,7 +18,7 @@ export default function LlmSetupModal({
   onClose,
   onSaved,
   title = '配置在线大模型',
-  description = '填写 API Key 后会自动拉取官方模型目录，保存后继续当前问话。',
+  description = '填写 API Key 后会自动从上游获取模型目录，保存后继续当前问话。',
 }: Props) {
   const keys = state.providerKeys ?? {};
   const [providerId, setProviderId] = useState(() => {
@@ -55,11 +55,11 @@ export default function LlmSetupModal({
       if (!silent) setFetchError('请先填写 API Key');
       return;
     }
-    setFetchStatus('拉取官方模型中...');
+    setFetchStatus('从上游获取模型中...');
     setFetchError(null);
     try {
       const models = await fetchProviderModels({ ...provider, baseUrl: baseUrl.trim() }, key);
-      setFetchStatus(`已拉取 ${models.length} 个官方模型`);
+      setFetchStatus(`已获取 ${models.length} 个上游模型`);
       onUpdateState({
         dynamicModels: {
           ...(state.dynamicModels ?? {}),
@@ -68,7 +68,7 @@ export default function LlmSetupModal({
       });
       if (!models.some((item) => item.id === modelId)) setModelId(models[0]?.id ?? modelId);
     } catch (fetchFailure) {
-      setFetchStatus('官方模型拉取失败');
+      setFetchStatus('上游模型获取失败');
       setFetchError((fetchFailure as Error).message || '请检查 API Key 和 Base URL');
     }
   };
@@ -172,7 +172,7 @@ export default function LlmSetupModal({
                 className="input flex-1 text-xs"
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
-                placeholder="填写 API Key，可自动拉取官方模型"
+                placeholder="填写 API Key，可自动从上游获取模型"
                 onChange={(event) => {
                   setApiKey(event.target.value);
                   scheduleOfficialModels(event.target.value);
@@ -183,7 +183,7 @@ export default function LlmSetupModal({
                 {showKey ? '隐藏' : '显示'}
               </button>
               <button className="btn-ghost shrink-0 px-2.5 text-xs" onClick={() => void fetchOfficialModels(false)}>
-                拉取官方
+                从上游获取
               </button>
             </div>
             {(fetchStatus || fetchError) && (
@@ -200,7 +200,7 @@ export default function LlmSetupModal({
                 <option key={item.id} value={item.id}>
                   {item.name}
                   {item.isFree && item.freeQuotaDaily > 0 ? ` · 免费额度 ${item.freeQuotaDaily}/日` : ''}
-                  {item.dynamic ? ' · 官方' : ''}
+                  {item.dynamic ? ' · 上游' : ''}
                 </option>
               ))}
             </select>

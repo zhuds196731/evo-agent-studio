@@ -67,13 +67,13 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
           [provider.id]: { models, fetchedAt: new Date().toISOString(), source: 'official' },
         },
       });
-      setFetchingModels((prev) => ({ ...prev, [provider.id]: `${models.length} 个官方模型` }));
-      onToast(`${provider.name} 已拉取 ${models.length} 个官方模型`);
+      setFetchingModels((prev) => ({ ...prev, [provider.id]: `${models.length} 个上游模型` }));
+      onToast(`${provider.name} 已获取 ${models.length} 个上游模型`);
     } catch (e) {
       const message = (e as Error).message || '拉取失败';
       setFetchingModels((prev) => ({ ...prev, [provider.id]: '拉取失败' }));
       setModelFetchErrors((prev) => ({ ...prev, [provider.id]: message }));
-      if (!silent) onToast(`${provider.name} 官方模型拉取失败：${message}`);
+      if (!silent) onToast(`${provider.name} 上游模型获取失败：${message}`);
     }
   };
 
@@ -383,7 +383,7 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                     <span className="w-5 text-center text-[10px] font-semibold text-slate-500">{index + 1}</span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-xs font-medium text-slate-100">{provider.name}</div>
-                      <div className="text-[10px] text-slate-500">{providerModels.length} 个模型 · {provider.region ?? '全球'}{catalog ? ` · 官方拉取 ${new Date(catalog.fetchedAt).toLocaleString('zh-CN', { hour12: false })}` : ''}</div>
+                      <div className="text-[10px] text-slate-500">{providerModels.length} 个模型 · {provider.region ?? '全球'}{catalog ? ` · 上游更新 ${new Date(catalog.fetchedAt).toLocaleString('zh-CN', { hour12: false })}` : ''}</div>
                     </div>
                     <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] text-slate-400">{provider.apiProtocol}</span>
                     {state.providerKeys[provider.id] && <span className="text-[10px] text-jade-400">已配置</span>}
@@ -392,7 +392,7 @@ export default function SettingsPanel({ state, onUpdateState, onReplaceState, on
                       disabled={fetchingModels[provider.id] === '拉取中…'}
                       onClick={() => void fetchOfficialModels(provider, state.providerKeys[provider.id] || '')}
                     >
-                      {catalog ? '刷新官方' : '拉取官方'}
+                      {catalog ? '刷新上游' : '从上游获取'}
                     </button>
                   </div>
                   <div className="mb-2 flex items-center gap-1.5">

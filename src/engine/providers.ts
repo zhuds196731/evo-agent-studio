@@ -405,7 +405,7 @@ export const BUILTIN_PROVIDERS: ProviderPreset[] = [
     ],
   },
 ];
-/** 运行时官方模型目录；应用启动时从持久化状态回填 */
+/** 运行时上游模型目录；应用启动时从持久化状态回填 */
 const dynamicCatalogs = new Map<string, import('../types').ProviderModelCatalog>();
 
 export function registerDynamicModels(providerId: string, models: ModelPreset[]) {
@@ -423,7 +423,7 @@ export function clearDynamicModelRegistry() {
   dynamicCatalogs.clear();
 }
 
-/** 预置模型保底 + 官方动态目录；同 ID 以官方模型优先 */
+/** 预置模型保底 + 上游动态目录；同 ID 以上游模型优先 */
 export function modelsForProvider(provider: ProviderPreset): ModelPreset[] {
   const dynamic = dynamicCatalogs.get(provider.id)?.models ?? [];
   const dynamicIds = new Set(dynamic.map((m) => m.id));
@@ -434,18 +434,18 @@ async function requestProviderModels(url: string, headers: Record<string, string
   const bridge = (window as any).evoNet as { request?: (input: { url: string; method?: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; text: string }> } | undefined;
   if (bridge?.request) {
     const result = await bridge.request({ url, method: 'GET', headers });
-    if (!result.ok) throw new Error(`官方模型接口返回 ${result.status}：${result.text.slice(0, 180)}`);
+    if (!result.ok) throw new Error(`上游模型接口返回 ${result.status}：${result.text.slice(0, 180)}`);
     return result.text;
   }
   const res = await fetch(url, { headers });
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`官方模型接口返回 ${res.status}：${detail.slice(0, 180)}`);
+    throw new Error(`上游模型接口返回 ${res.status}：${detail.slice(0, 180)}`);
   }
   return res.text();
 }
 
-/** 拉取供应商官方模型目录；支持 OpenAI 兼容、Anthropic、Google 三种返回 */
+/** 从供应商上游获取模型目录；支持 OpenAI 兼容、Anthropic、Google 三种返回 */
 export async function fetchProviderModels(provider: ProviderPreset, apiKey: string): Promise<ModelPreset[]> {
   const key = apiKey.trim();
   if (!key) throw new Error('请先填写 API Key');
@@ -461,7 +461,7 @@ export async function fetchProviderModels(provider: ProviderPreset, apiKey: stri
   const payload = JSON.parse(text);
   const rows = Array.isArray(payload) ? payload : payload.data ?? payload.models ?? payload.result?.models ?? [];
   const models = normalizeOfficialModels(rows);
-  if (!models.length) throw new Error('官方接口未返回可用模型');
+  if (!models.length) throw new Error('上游接口未返回可用模型');
   registerDynamicModels(provider.id, models);
   return models;
 }
@@ -487,7 +487,7 @@ function normalizeOfficialModels(rows: unknown[]): ModelPreset[] {
       freeQuotaDaily: 0,
       inputPerMillion: 2,
       outputPerMillion: 8,
-      tags: ['官方', '动态'],
+      tags: ['上游', '动态'],
       dynamic: true,
     });
   }

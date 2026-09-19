@@ -227,7 +227,7 @@ export interface MediaModelPreset {
   /** 能力说明 */
   notes: string;
   tags: string[];
-  /** 官方模型目录动态拉取项 */
+  /** 上游模型目录动态拉取项 */
   dynamic?: boolean;
   /** 模型实际的 API Base URL（可与聊天供应商不同） */
   baseUrl: string;
@@ -287,7 +287,7 @@ export interface ModelPreset {
   outputPerMillion: number;
   /** 适合场景标签 */
   tags: string[];
-  /** 从官方模型目录动态拉取的模型 */
+  /** 从上游模型目录动态拉取的模型 */
   dynamic?: boolean;
 }
 
