@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { publicAsset } from '../utils/assets';
 import { capabilitySnapshot } from '../engine/evolution';
 import { BUILTIN_PROVIDERS } from '../engine/providers';
 import { PLUGIN_CATEGORIES } from '../data/pluginCatalog';
@@ -40,7 +41,7 @@ export default function AboutPanel({ state }: Props) {
       <div className="mx-auto max-w-3xl">
         <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-royal-500/15 via-transparent to-jade-500/15 p-6 text-center">
           <img
-            src="/logo.png"
+            src={publicAsset('logo.png')}
             alt="Self-Evolving Agent"
             className="mx-auto w-44"
           />

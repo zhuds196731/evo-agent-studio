@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { publicAsset } from '../utils/assets';
 import type { AppState } from '../types';
 import {
   junkScan,
@@ -219,7 +220,7 @@ export default function PcAssistant({ onToast }: { state: AppState; onToast: (ms
       <div className="flex w-52 shrink-0 flex-col gap-3">
         <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-3">
           <div className="flex items-center gap-2.5">
-            <img src="/assistant.jpg" alt="电脑助手" className="h-11 w-11 rounded-xl object-cover ring-1 ring-white/10" />
+            <img src={publicAsset('assistant.jpg')} alt="电脑助手" className="h-11 w-11 rounded-xl object-cover ring-1 ring-white/10" />
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-slate-100">电脑助手</div>
               <div className="text-[10px] text-slate-500">系统级 · 仅本机运行</div>

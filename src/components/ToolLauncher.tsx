@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { publicAsset } from '../utils/assets';
 
 /**
  * 工具箱启动器：顶栏常驻的助手头像，点击弹出工具列表。
@@ -102,7 +103,7 @@ export default function ToolLauncher({
         }`}
       >
         <img
-          src="/assistant.jpg"
+          src={publicAsset('assistant.jpg')}
           alt="工具箱"
           className="h-8 w-8 select-none rounded-full object-cover"
           draggable={false}

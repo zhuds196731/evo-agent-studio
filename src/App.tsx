@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { publicAsset } from './utils/assets';
 import type { AppState, Persona, SceneType } from './types';
 import { loadState, saveState } from './store/storage';
 import PositionCenter from './components/PositionCenter';
@@ -120,7 +121,7 @@ export default function App() {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
         <div className="flex items-center gap-3">
           <img
-            src="/icon-512.png"
+            src={publicAsset('icon-512.png')}
             alt="Self-Evolving Agent"
             className="h-9 w-9 select-none drop-shadow-[0_0_6px_rgb(var(--royal-500)/0.35)]"
           />
