@@ -59,6 +59,13 @@ export function downloadSessionMarkdown(session: Session, state: AppState): void
   const a = document.createElement('a');
   a.href = url;
   a.download = `${safeFileName(session.title)}.md`;
+  a.style.display = 'none';
+  // 必须挂到文档上：部分浏览器（Firefox / Safari）不认游离节点的 click。
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  // 延后释放：同步 revoke 会让还没开始读取的下载直接被取消。
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 1000);
 }

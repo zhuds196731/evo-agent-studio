@@ -1,7 +1,7 @@
 {
   "name": "evo-agent-studio",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Self-Evolving Agent · 多模态智能体协同平台：岗位数字人、多场景对话、先哲思想咨询、知识库、记事本、投资分析",
   "main": "electron/main.cjs",
@@ -15,6 +15,19 @@
       "dist/**",
       "electron/**",
       "vite.tdxPlugin.mjs"
+    ],
+    "extraResources": [
+      {
+        "from": "native/",
+        "to": "native",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/*.dll"
     ],
     "win": {
       "target": [
@@ -36,10 +49,10 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "SelfEvolvingAgent-0.1.0-setup-x64.exe"
+      "artifactName": "SelfEvolvingAgent-${version}-setup-x64.exe"
     },
     "portable": {
-      "artifactName": "SelfEvolvingAgent-0.1.0-portable-x64.exe"
+      "artifactName": "SelfEvolvingAgent-${version}-portable-x64.exe"
     }
   },
   "scripts": {
@@ -54,6 +67,7 @@
   },
   "dependencies": {
     "@capacitor/core": "^6.1.2",
+    "hls.js": "^1.7.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.169.0"

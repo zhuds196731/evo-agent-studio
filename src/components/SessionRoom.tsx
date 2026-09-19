@@ -29,7 +29,7 @@ import { formatBytes } from '../engine/knowledge';
 
 interface Props {
   state: AppState;
-  onUpdateState: (patch: Partial<AppState>) => void;
+  onUpdateState: (patch: Partial<AppState> | ((prev: AppState) => Partial<AppState>)) => void;
   onToast: (msg: string) => void;
   initialScene?: SceneType;
   initialSageId?: string;
@@ -146,6 +146,15 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     [state.llm, state.providerKeys],
   );
   const hasModel = Boolean(routedModel);
+  /** 先哲咨询默认联网检索；老会话未写入该字段时也按在线模式处理 */
+  const isOnlineConsult = active?.scene === 'consult' && active.webMode !== 'offline';
+
+  const setConsultWebMode = (webMode: 'online' | 'offline') => {
+    if (!active || active.scene !== 'consult' || active.webMode === webMode) return;
+    onUpdateState({
+      sessions: state.sessions.map((s) => (s.id === active.id ? { ...s, webMode } : s)),
+    });
+  };
 
   // 切换场景时，把活动会话对齐到当前场景，避免误用其他场景的会话
   useEffect(() => {
@@ -284,6 +293,7 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
       title: `问策 · ${sage.name}`,
       scene: 'consult',
       participantIds: [sage.id],
+      webMode: 'online',
     });
     openOrCreate(session);
   };
@@ -493,10 +503,12 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     setBusy(true);
     try {
       await runTurn(runState, session, promptText || '\u8bf7\u9605\u8bfb\u5e76\u5206\u6790\u4e0a\u4f20\u7684\u9644\u4ef6\u3002');
-      onUpdateState({
-        sessions: runState.sessions.map((s) => (s.id === session.id ? { ...session } : s)),
+      // 用函数式更新而不是闭包里的 runState.sessions：一轮生成常耗时数十秒，
+      // 期间用户可能删掉或新建了别的会话，直接回写旧数组会把那些改动整批抹掉。
+      onUpdateState((prev) => ({
+        sessions: prev.sessions.map((s) => (s.id === session.id ? { ...session } : s)),
         activeSessionId: session.id,
-      });
+      }));
     } catch (e) {
       console.error('[session] \u672c\u8f6e\u751f\u6210\u5f02\u5e38\uff1a', e);
       onToast(`\u672c\u8f6e\u751f\u6210\u5931\u8d25\uff1a${(e as Error)?.message ?? '\u8bf7\u91cd\u8bd5'}`);
@@ -602,7 +614,7 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
       };
     }
     const sage = state.sages.find((s) => s.id === id);
-    if (sage) return { name: sage.name, emoji: sage.emoji, accent: sage.accent, sub: sage.school };
+    if (sage) return { name: sage.name, url: sage.avatarUrl, emoji: sage.emoji, accent: sage.accent, sub: sage.school };
     return { name: '我', emoji: '🙂', accent: '#5b7cfa', sub: '' };
   };
 
@@ -1110,6 +1122,31 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
                   </button>
                 </div>
               )}
+              {active.scene === 'consult' && (
+                <div className="mb-2 flex items-center justify-between rounded-lg border border-white/10 bg-white/5 px-2 py-1.5">
+                  <span className="min-w-0 truncate text-[11px] text-slate-400">
+                    {isOnlineConsult ? '联网回答：检索最新资料后综合' : '离线回答：依据既有学识作答'}
+                  </span>
+                  <div className="ml-2 flex shrink-0 rounded-md bg-black/20 p-0.5">
+                    <button
+                      className={`rounded px-2 py-1 text-[11px] transition ${
+                        isOnlineConsult ? 'bg-royal-500/25 text-royal-300' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                      onClick={() => setConsultWebMode('online')}
+                    >
+                      联网
+                    </button>
+                    <button
+                      className={`rounded px-2 py-1 text-[11px] transition ${
+                        !isOnlineConsult ? 'bg-white/10 text-slate-200' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                      onClick={() => setConsultWebMode('offline')}
+                    >
+                      离线
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="mb-2 flex items-center gap-3 text-lg text-slate-400">
                 <button title="生成图片（输入描述后点生成）" onClick={() => openMediaBar('image')}>
                   🎨
@@ -1267,7 +1304,7 @@ function Picker({ state, scene, picked, onToggle, onCancel, onConfirm, onPickSag
               }}
               className="flex items-center gap-3 rounded-xl border border-white/5 bg-ink-700/50 p-3 text-left hover:bg-white/5"
             >
-              <Avatar name={s.name} emoji={s.emoji} accent={s.accent} size={40} />
+              <Avatar name={s.name} url={s.avatarUrl} emoji={s.emoji} accent={s.accent} size={40} />
               <div>
                 <div className="text-sm text-slate-100">
                   {s.name}

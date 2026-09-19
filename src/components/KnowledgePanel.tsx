@@ -2,11 +2,16 @@ import { useMemo, useRef, useState } from 'react';
 import type { AppState } from '../types';
 import { buildKnowledgeGraph } from '../engine/knowledgeGraph';
 import KnowledgeGraph3D from './KnowledgeGraph3D';
+import ComboboxPicker from './ComboboxPicker';
 import { formatBytes, knowledgeStore, MAX_FILE_BYTES, type KnowledgeFile } from '../engine/knowledge';
 
 /**
- * 知识库：预置分类目录 + 自定义分类 + 本地文件上传。
- * 文件全部保存在本机（软件运行时的本地存储位置），不上传任何服务器。
+ * 知识库：单页三区——右侧三维图谱为主视图，左侧「主分类下拉 + 知识列表」。
+ *
+ * 设计要点（对应此前多余的交互）：
+ * 1. 不再有「文件列表 / 三维图谱」互斥切换，图谱与列表同屏，一次看全；
+ * 2. 不再有顶部按钮组、列表头部按钮组、右键菜单三处重复的切换入口；
+ * 3. 分类计数、当前分类文件、容量统计只做一次本地读取，不再按分类反复全量扫描。
  */
 
 interface Props {
@@ -16,10 +21,10 @@ interface Props {
 
 export default function KnowledgePanel({ state, onToast }: Props) {
   const [tick, setTick] = useState(0);
-  const [mode, setMode] = useState<'files' | 'graph'>('files');
   const refresh = () => setTick((t) => t + 1);
 
-  const categories = knowledgeStore.categories();
+  /** 分类与文件快照一样，只在 refresh 后重读，避免每次渲染都扫一遍本地存储 */
+  const categories = useMemo(() => knowledgeStore.categories(), [tick]);
   const [activeCat, setActiveCat] = useState(categories[0]?.id ?? '');
   const [keyword, setKeyword] = useState('');
   const [newCat, setNewCat] = useState('');
@@ -27,15 +32,43 @@ export default function KnowledgePanel({ state, onToast }: Props) {
   const [preview, setPreview] = useState<KnowledgeFile | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const usage = knowledgeStore.usage();
-  const graphData = useMemo(() => buildKnowledgeGraph(state), [state, tick]);
-  const files = useMemo(() => {
-    const list = knowledgeStore.filesBy(activeCat);
-    if (!keyword.trim()) return list;
-    return list.filter((f) => f.name.toLowerCase().includes(keyword.trim().toLowerCase()));
-  }, [activeCat, keyword]);
+  /** 一次本地读取，派生出分类计数与容量统计，避免每个分类各扫一遍 */
+  const snapshot = useMemo(() => {
+    const all = knowledgeStore.files();
+    const counts: Record<string, number> = {};
+    for (const file of all) counts[file.categoryId] = (counts[file.categoryId] ?? 0) + 1;
+    return {
+      all,
+      counts,
+      count: all.length,
+      bytes: all.reduce((total, file) => total + Math.round(file.size * 1.37), 0),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
 
-  const countOf = (catId: string) => knowledgeStore.filesBy(catId).length;
+  // buildKnowledgeGraph 内部会读本地知识文件，所以必须带上 tick：上传/删除后图谱才跟着更新
+  const graphData = useMemo(() => buildKnowledgeGraph(state), [state, tick]);
+
+  const files = useMemo(() => {
+    const query = keyword.trim().toLowerCase();
+    return snapshot.all.filter(
+      (file) =>
+        file.categoryId === activeCat &&
+        (!query || file.name.toLowerCase().includes(query)),
+    );
+  }, [snapshot, activeCat, keyword]);
+
+  const categoryOptions = useMemo(
+    () =>
+      categories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        sub: `${snapshot.counts[c.id] ?? 0} 个`,
+        group: c.builtin ? '预置分类' : '自定义分类',
+        keywords: c.builtin ? '预置' : '自定义',
+      })),
+    [categories, snapshot],
+  );
 
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList?.length) return;
@@ -59,10 +92,13 @@ export default function KnowledgePanel({ state, onToast }: Props) {
     onToast(`已创建分类「${cat.name}」`);
   };
 
-  const handleRemoveCategory = (catId: string) => {
-    const cat = categories.find((c) => c.id === catId);
-    if (!cat) return;
-    const n = countOf(catId);
+  const handleRemoveCategory = () => {
+    const cat = categories.find((c) => c.id === activeCat);
+    if (!cat || cat.builtin) {
+      onToast('预置分类不可删除');
+      return;
+    }
+    const n = snapshot.counts[cat.id] ?? 0;
     if (
       !window.confirm(
         n > 0
@@ -71,37 +107,32 @@ export default function KnowledgePanel({ state, onToast }: Props) {
       )
     )
       return;
-    knowledgeStore.removeCategory(catId);
+    knowledgeStore.removeCategory(cat.id);
     setActiveCat(knowledgeStore.categories()[0]?.id ?? '');
     refresh();
     onToast(`分类「${cat.name}」已删除`);
   };
 
-  if (mode === 'graph') {
-    return (
-      <div className="relative h-full">
-        <KnowledgeGraph3D data={graphData} />
-        <div className="absolute left-1/2 top-4 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-white/10 bg-black/45 p-1 backdrop-blur">
-          <button className="rounded-lg bg-white/10 px-3 py-1.5 text-xs text-slate-100" onClick={() => setMode('files')}>文件列表</button>
-          <button className="rounded-lg bg-royal-500 px-3 py-1.5 text-xs text-white">三维图谱</button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
-      {/* 分类目录 */}
-      <div className="panel flex flex-col overflow-hidden">
-        <div className="border-b border-white/5 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-200">知识库分类</h2>
-            <button className="btn-jade px-2 py-1 text-xs" onClick={() => setAddingCat((a) => !a)}>
+    <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[320px_1fr]">
+      {/* 左：主分类下拉 + 知识列表 */}
+      <div className="panel flex min-h-0 flex-col overflow-hidden">
+        <div className="space-y-2 border-b border-white/5 p-3">
+          <div className="flex items-center gap-2">
+            <span className="shrink-0 text-xs font-medium text-slate-300">主分类</span>
+            <ComboboxPicker
+              value={activeCat}
+              options={categoryOptions}
+              onChange={setActiveCat}
+              placeholder={categories.length ? '选择分类' : '暂无分类'}
+              searchHint="查找分类"
+            />
+            <button className="btn-jade shrink-0 px-2 py-1 text-xs" onClick={() => setAddingCat((a) => !a)}>
               +
             </button>
           </div>
           {addingCat && (
-            <div className="mb-2 flex gap-1.5">
+            <div className="flex gap-1.5">
               <input
                 className="input flex-1 text-xs"
                 value={newCat}
@@ -117,54 +148,9 @@ export default function KnowledgePanel({ state, onToast }: Props) {
               </button>
             </div>
           )}
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {categories.map((c) => (
-            <div
-              key={c.id}
-              className={`group mb-0.5 flex w-full items-center rounded-lg px-2.5 py-2 text-left transition ${
-                c.id === activeCat ? 'bg-royal-500/20 ring-1 ring-royal-500/40' : 'hover:bg-white/5'
-              }`}
-            >
-              <button className="min-w-0 flex-1 text-left" onClick={() => setActiveCat(c.id)}>
-                <div className="truncate text-sm text-slate-100">{c.name}</div>
-                <div className="text-[11px] text-slate-500">
-                  {countOf(c.id)} 个文件{c.builtin ? ' · 预置' : ''}
-                </div>
-              </button>
-              {!c.builtin && (
-                <button
-                  className="hidden text-[10px] text-slate-500 hover:text-rose-300 group-hover:block"
-                  onClick={() => handleRemoveCategory(c.id)}
-                  title="删除该自定义分类"
-                >
-                  删除
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="border-t border-white/5 p-3 text-[10px] leading-relaxed text-slate-500">
-          已存 {usage.count} 个文件 · 占用 {formatBytes(usage.bytes)}
-          <br />
-          文件保存在本机（软件运行时的本地存储位置），不上传任何服务器。
-        </div>
-      </div>
-
-      {/* 文件列表 */}
-      <div className="panel flex min-h-0 flex-col overflow-hidden p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <div className="mr-1 flex items-center gap-1 rounded-lg border border-white/10 bg-ink-700/60 p-1">
-            <button className="rounded-md bg-royal-500 px-2.5 py-1 text-xs text-white" onClick={() => setMode('files')}>文件列表</button>
-            <button className="rounded-md px-2.5 py-1 text-xs text-slate-300 hover:bg-white/10" onClick={() => setMode('graph')}>三维图谱</button>
-          </div>
-          <h3 className="text-sm font-semibold text-slate-200">
-            {categories.find((c) => c.id === activeCat)?.name ?? '知识库'}
-          </h3>
-          <span className="text-[11px] text-slate-500">{files.length} 个文件</span>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <input
-              className="input w-44 text-xs"
+              className="input flex-1 text-xs"
               placeholder="搜索文件名"
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
@@ -179,62 +165,76 @@ export default function KnowledgePanel({ state, onToast }: Props) {
                 e.target.value = '';
               }}
             />
-            <button className="btn-primary shrink-0 px-3 py-1.5 text-xs" onClick={() => fileRef.current?.click()}>
-              ⬆ 上传文件
+            <button className="btn-primary shrink-0 px-2.5 py-1 text-[11px]" onClick={() => fileRef.current?.click()}>
+              ⬆ 上传
             </button>
           </div>
+          <div className="flex items-center justify-between text-[10px] text-slate-500">
+            <span>{files.length} 个文件 · 单文件上限 {formatBytes(MAX_FILE_BYTES)}</span>
+            {!categories.find((c) => c.id === activeCat)?.builtin && (
+              <button className="text-[10px] text-slate-500 hover:text-rose-300" onClick={handleRemoveCategory}>
+                删除分类
+              </button>
+            )}
+          </div>
         </div>
-        <p className="mb-3 text-[11px] text-slate-500">
-          支持多选上传，单文件不超过 {formatBytes(MAX_FILE_BYTES)}；文档（txt/md/csv/json）、图片可直接预览，其余可随时下载。
-        </p>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
           {files.length ? (
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {files.map((f) => (
-                <div key={f.id} className="rounded-xl border border-white/5 bg-ink-700/40 p-3">
-                  <div className="flex items-start gap-2">
-                    <span className="text-xl">{knowledgeStore.isImage(f) ? '🖼️' : '📄'}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-medium text-slate-100" title={f.name}>
-                        {f.name}
-                      </div>
-                      <div className="text-[10px] text-slate-500">
-                        {formatBytes(f.size)} · {new Date(f.uploadedAt).toLocaleString('zh-CN', { hour12: false })}
-                      </div>
+            files.map((f) => (
+              <div key={f.id} className="rounded-lg border border-white/5 bg-ink-700/40 p-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-base leading-none">{knowledgeStore.isImage(f) ? '🖼️' : '📄'}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-xs text-slate-100" title={f.name}>
+                      {f.name}
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      {formatBytes(f.size)} · {new Date(f.uploadedAt).toLocaleString('zh-CN', { hour12: false })}
                     </div>
                   </div>
-                  <div className="mt-2 flex gap-1.5">
-                    {(knowledgeStore.isImage(f) || knowledgeStore.readText(f) !== null) && (
-                      <button className="btn-ghost px-2 py-0.5 text-[11px]" onClick={() => setPreview(f)}>
-                        预览
-                      </button>
-                    )}
-                    <button className="btn-ghost px-2 py-0.5 text-[11px]" onClick={() => knowledgeStore.download(f)}>
-                      下载
-                    </button>
-                    <button
-                      className="btn-ghost px-2 py-0.5 text-[11px] text-rose-300"
-                      onClick={() => {
-                        if (window.confirm(`删除文件「${f.name}」？`)) {
-                          knowledgeStore.removeFile(f.id);
-                          refresh();
-                          onToast('文件已删除');
-                        }
-                      }}
-                    >
-                      删除
-                    </button>
-                  </div>
                 </div>
-              ))}
-            </div>
+                <div className="mt-1.5 flex gap-1">
+                  {(knowledgeStore.isImage(f) || knowledgeStore.readText(f) !== null) && (
+                    <button className="btn-ghost px-1.5 py-0.5 text-[10px]" onClick={() => setPreview(f)}>
+                      预览
+                    </button>
+                  )}
+                  <button className="btn-ghost px-1.5 py-0.5 text-[10px]" onClick={() => knowledgeStore.download(f)}>
+                    下载
+                  </button>
+                  <button
+                    className="btn-ghost px-1.5 py-0.5 text-[10px] text-rose-300"
+                    onClick={() => {
+                      if (window.confirm(`删除文件「${f.name}」？`)) {
+                        knowledgeStore.removeFile(f.id);
+                        refresh();
+                        onToast('文件已删除');
+                      }
+                    }}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))
           ) : (
-            <div className="flex h-full items-center justify-center text-xs text-slate-500">
-              {keyword ? '没有匹配的文件' : '该分类暂无文件，点击「上传文件」添加'}
+            <div className="flex h-full items-center justify-center px-3 text-center text-[11px] text-slate-500">
+              {keyword ? '没有匹配的文件' : '该分类暂无文件，点击「⬆ 上传」添加'}
             </div>
           )}
         </div>
+
+        <div className="border-t border-white/5 p-2.5 text-[10px] leading-relaxed text-slate-500">
+          已存 {snapshot.count} 个文件 · 占用 {formatBytes(snapshot.bytes)}
+          <br />
+          文件保存在本机，不上传任何服务器。
+        </div>
+      </div>
+
+      {/* 右：三维图谱主视图 */}
+      <div className="panel relative min-h-0 overflow-hidden">
+        <KnowledgeGraph3D data={graphData} />
       </div>
 
       {/* 预览弹窗 */}

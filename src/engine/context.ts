@@ -52,7 +52,9 @@ export function compactContext(opts: {
     .slice(-6)
     .map((x) => x.evidence ?? x.text);
 
-  const completed = rows.filter((x) => x.done).map((_, i) => i);
+  // 必须带原下标：filter 之后的 map 下标是「已完成任务里的序号」，
+  // 拿它去和步骤总数做差集，得到的是错位的步骤号。
+  const completed = rows.map((x, i) => (x.done ? i : -1)).filter((i) => i >= 0);
   const total = opts.steps?.length ?? rows.length;
   const pending = Array.from({ length: total }, (_, i) => i).filter((i) => !completed.includes(i));
 

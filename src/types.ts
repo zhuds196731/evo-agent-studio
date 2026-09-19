@@ -66,6 +66,8 @@ export interface Sage {
   accent: string;
   emoji: string;
   builtin: boolean;
+  /** 用户上传或替换的先哲形象，保存为压缩后的 dataURL */
+  avatarUrl?: string;
 }
 
 export interface ChatAttachment {
@@ -112,6 +114,8 @@ export interface Session {
   updatedAt: number;
   /** 置顶的会话在侧栏排最前 */
   pinned?: boolean;
+  /** 先哲咨询回答模式：在线检索后综合，离线仅用模型知识 */
+  webMode?: 'online' | 'offline';
 }
 
 export type TurnPolicy = 'round-robin' | 'moderated' | 'free';
@@ -223,9 +227,31 @@ export interface MediaModelPreset {
   /** 能力说明 */
   notes: string;
   tags: string[];
+  /** 上游模型目录动态拉取项 */
+  dynamic?: boolean;
+  /** 模型实际的 API Base URL（可与聊天供应商不同） */
+  baseUrl: string;
+  /** 申请 API Key 的入口 */
+  apiKeyUrl: string;
+  /** 视频/图像接口协议，决定轮询与返回解析 */
+  apiProtocol?: 'openai-image' | 'zhipu-video' | 'luma-video' | 'google-veo' | 'dashscope-video' | 'openai-sora';
+}
+
+/** 仅用于多媒体接入的服务商；不进入聊天模型路由 */
+export interface MediaProviderPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKeyUrl: string;
 }
 
 /** 多媒体模型设置：用户在设置中心一次性配置，前端输入需求时自动匹配 */
+/** 供应商官方 /models 拉取结果，仅保存在本机 */
+export interface ProviderModelCatalog {
+  models: ModelPreset[];
+  fetchedAt: string;
+  source: 'official';
+}
 export interface MediaSettings {
   /** 手动锁定的绘图模型（不设置则自动匹配） */
   imageModelId?: string;
@@ -244,6 +270,10 @@ export interface ProviderPreset {
   apiKeyUrl: string;
   models: ModelPreset[];
   builtin: boolean;
+  /** 聊天补全协议；预置表统一给出，默认 OpenAI 兼容 */
+  apiProtocol?: 'openai' | 'anthropic' | 'google';
+  /** 按使用热度展示的区域标签 */
+  region?: '全球' | '国内' | '聚合';
 }
 
 export interface ModelPreset {
@@ -257,6 +287,8 @@ export interface ModelPreset {
   outputPerMillion: number;
   /** 适合场景标签 */
   tags: string[];
+  /** 从上游模型目录动态拉取的模型 */
+  dynamic?: boolean;
 }
 
 /** 插件（工具）：智能体可调用的能力 */
@@ -283,6 +315,16 @@ export interface Plugin {
     qualityPassed: boolean;
   };
   builtin: boolean;
+  /** 插件来源；core 为自带核心工具，skillhub 表示内置技能包转换而来。 */
+  source?: 'core' | 'manual' | 'skillhub';
+  /** 用户可见的插件分类；仅影响展示，不影响调用能力。 */
+  category?: string;
+  /** 加载方式：resident 随启动即加载并常驻能力池；ondemand 命中能力标签时才注入。 */
+  loadMode?: 'resident' | 'ondemand';
+  /** 钉在插件库第一位且不可降级（当前只有上下文压缩器，它直接为省 token 服务）。 */
+  pinned?: boolean;
+  /** 能力匹配加权：数值越大越优先，用来让强插件压过同族的弱插件。 */
+  weight?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -354,6 +396,37 @@ export interface NotepadSettings {
   /** 单文件上传上限；null 表示无限制 */
   maxUploadBytes: number | null;
 }
+/** 单项关怀提醒（用眼 / 饮水 / 起身活动） */
+export interface CareItemSettings {
+  enabled: boolean;
+  /** 间隔，单位分钟 */
+  minutes: number;
+}
+/** 中医养生智能体设置：随 AppState 一起保存、备份和导入 */
+export interface HealthSettings {
+  /** 总开关 */
+  enabled: boolean;
+  /** 用眼 / 饮水 / 久坐 三项计时提醒 */
+  care: Record<'eye' | 'water' | 'sit', CareItemSettings>;
+  /** 时辰经络（子午流注）切换提醒 */
+  meridianNotice: boolean;
+  /** 节气切换提醒 */
+  solarTermNotice: boolean;
+  /** 语音播报 */
+  voiceEnabled: boolean;
+  /** 预置音色 id（见 engine/speech.ts 的 VOICE_PRESETS） */
+  voiceId: string;
+  /** 语速 0.5–2 */
+  rate: number;
+  /** 音量 0–1 */
+  volume: number;
+  /** 免打扰起始时间 HH:MM */
+  quietFrom: string;
+  /** 免打扰结束时间 HH:MM */
+  quietTo: string;
+  /** LED 屏主色 */
+  ledColor: 'green' | 'amber' | 'cyan' | 'red';
+}
 export interface AppState {
   positions: Position[];
   personas: Persona[];
@@ -363,8 +436,12 @@ export interface AppState {
   activeSessionId: string | null;
   /** 用户自定义 provider API Keys（provider id → key） */
   providerKeys: Record<string, string>;
+  /** 每个供应商从官方 /models 接口拉取的模型目录 */
+  dynamicModels: Record<string, ProviderModelCatalog>;
   /** 插件注册表 */
   plugins: Plugin[];
+  /** 插件分类目录；特殊技能为内置首栏，其余可由用户维护。 */
+  pluginCategories: string[];
   /** 进化日志 */
   evolutionLogs: EvolutionLog[];
   /** 待审批的进化建议 */
@@ -379,6 +456,8 @@ export interface AppState {
   /** 通达信只读行情源配置；设置中心与投资分析共用 */
   tdx: TdxRuntimeConfig;
   media: MediaSettings;
+  /** 中医养生智能体设置 */
+  health: HealthSettings;
 }
 /** 通达信只读行情源的运行时配置，随 AppState 一起保存、备份和导入。 */
 export type TdxConfigSource = 'default' | 'custom' | 'tdx';

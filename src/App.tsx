@@ -14,11 +14,19 @@ import KnowledgePanel from './components/KnowledgePanel';
 import NotepadPanel from './components/NotepadPanel';
 import InvestmentPanel from './components/InvestmentPanel';
 import ThemeSwitcher, { applyTheme, currentTheme } from './components/ThemeSwitcher';
+import HealthClock from './components/HealthClock';
+import PcAssistant from './components/PcAssistant';
+import TvAgent from './components/TvAgent';
+import ToolLauncher from './components/ToolLauncher';
+import GfSecurities from './components/GfSecurities';
+import ImaPanel from './components/ImaPanel';
 
 type View =
   | 'positions'
   | 'sessions'
   | 'investment'
+  | 'gf'
+  | 'ima'
   | 'sages'
   | 'knowledge'
   | 'notepad'
@@ -27,12 +35,16 @@ type View =
   | 'plugins'
   | 'evolution'
   | 'help'
-  | 'about';
+  | 'about'
+  | 'pc'
+  | 'tv';
 
 const NAV: { key: View; label: string; icon: string }[] = [
   { key: 'positions', label: '岗位中心', icon: '🏢' },
   { key: 'sessions', label: '协同会话', icon: '💬' },
   { key: 'investment', label: '投资分析', icon: '📈' },
+  { key: 'gf', label: '广发投研', icon: '🏦' },
+  { key: 'ima', label: 'IMA 知识库', icon: '🧠' },
   { key: 'sages', label: '先哲堂', icon: '🪷' },
   { key: 'knowledge', label: '知识库', icon: '📚' },
   { key: 'notepad', label: '记事本', icon: '📝' },
@@ -44,13 +56,31 @@ const NAV: { key: View; label: string; icon: string }[] = [
   { key: 'about', label: '关于', icon: 'ℹ️' },
 ];
 
+const VIEW_KEYS: View[] = [
+  'positions', 'sessions', 'investment', 'gf', 'ima', 'sages', 'knowledge', 'notepad',
+  'usage', 'settings', 'plugins', 'evolution', 'help', 'about', 'pc', 'tv',
+];
+
+/** 支持 #pc / #tv 这样的深链，方便直达某个面板 */
+function initialView(): View {
+  const hash = window.location.hash.replace('#', '') as View;
+  return VIEW_KEYS.includes(hash) ? hash : 'sessions';
+}
+
 export default function App() {
   const [state, setState] = useState<AppState>(loadState);
   // 启动时应用持久化的皮肤
   useEffect(() => {
     applyTheme(currentTheme());
   }, []);
-  const [view, setView] = useState<View>('sessions');
+  const [view, setView] = useState<View>(initialView);
+
+  // 视图变化同步到地址栏 hash，刷新/收藏都能回到同一页面
+  useEffect(() => {
+    if (window.location.hash !== `#${view}`) {
+      window.history.replaceState(null, '', `#${view}`);
+    }
+  }, [view]);
   const [toast, setToast] = useState<string | null>(null);
   const [consult, setConsult] = useState<{ sageId: string; scene: SceneType } | null>(null);
   const handledConsult = useRef<string | null>(null);
@@ -87,9 +117,13 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center justify-between border-b border-white/5 px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/5 px-4 py-3">
         <div className="flex items-center gap-3">
-          <img src="/icon.svg" alt="Self-Evolving Agent" className="h-9 w-9 drop-shadow-[0_0_6px_rgb(var(--royal-500)/0.35)]"/>
+          <img
+            src="/icon-512.png"
+            alt="Self-Evolving Agent"
+            className="h-9 w-9 select-none drop-shadow-[0_0_6px_rgb(var(--royal-500)/0.35)]"
+          />
           <div>
             <div className="text-sm font-semibold tracking-wide text-slate-100">
               Self‑Evolving Agent
@@ -97,7 +131,9 @@ export default function App() {
             <div className="text-[11px] text-slate-500">多模态智能体协同 · 岗位数字人 · 先哲思想咨询</div>
           </div>
         </div>
-        <nav className="flex items-center gap-1">
+        <HealthClock state={state} onUpdateState={update} />
+        <nav className="flex flex-wrap items-center justify-end gap-1">
+          <ToolLauncher activeKey={view} onPick={(key) => setView(key as View)} />
           {NAV.map((n) => (
             <button
               key={n.key}
@@ -136,6 +172,8 @@ export default function App() {
           />
         )}
         {view === 'investment' && <InvestmentPanel state={state} onUpdateState={update} onToast={setToast} />}
+        {view === 'gf' && <GfSecurities onToast={setToast} />}
+        {view === 'ima' && <ImaPanel onToast={setToast} />}
         {view === 'sages' && (
           <SageHall state={state} onUpdateState={update} onConsult={onConsult} onToast={setToast} />
         )}
@@ -164,6 +202,8 @@ export default function App() {
         )}
         {view === 'help' && <HelpPanel />}
         {view === 'about' && <AboutPanel state={state} />}
+        {view === 'pc' && <PcAssistant state={state} onToast={setToast} />}
+        {view === 'tv' && <TvAgent onToast={setToast} />}
       </main>
 
       {toast && (

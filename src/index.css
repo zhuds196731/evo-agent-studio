@@ -2,128 +2,189 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+/*
+ * 皮肤系统 v2
+ * ---------------------------------------------------------------------------
+ * 设计准则：
+ *  1) 文字色阶按「可辨识」而非「等比」拉开：相邻层级亮度差 ≥ 40，杜绝发糊。
+ *     序列统一为  255 / 226 / 148 / 100 / 71（暗色）与 15 / 30 / 71 / 100 / 130（亮色）
+ *  2) 底色做「减法」：暗色底取到近纯黑(#0609xx)，让高饱和主色成为唯一焦点。
+ *  3) 主色不再复用 Tailwind 默认值，每套皮肤有自己的记忆色。
+ *  4) 交互元素一律带渐变或光晕，解决原来「灰扑扑不亮眼」的问题。
+ * ---------------------------------------------------------------------------
+ */
+
+:root,
+[data-theme='punk'] {
   color-scheme: dark;
 
-  /* Deep Space Workbench: navy base, crisp text, one clear action hue */
-  --ink-900: 13 20 32;
-  --ink-800: 27 39 62;
-  --ink-700: 38 54 82;
-  --ink-600: 52 74 108;
-  --ink-500: 76 100 132;
-  --jade-300: 110 231 183;
-  --jade-400: 74 222 128;
-  --jade-500: 34 197 94;
-  --jade-600: 22 138 78;
-  --royal-300: 147 197 253;
-  --royal-400: 96 165 250;
-  --royal-500: 59 130 246;
-  --royal-600: 29 78 216;
-  --text-strong: 246 249 255;
-  --text-primary: 220 231 247;
-  --text-secondary: 182 200 224;
-  --text-muted: 143 163 189;
-  --text-faint: 115 135 162;
-  --line: 84 108 140;
-  --surface-1: 27 39 62;
-  --surface-2: 38 54 82;
-  --wx-mine: 219 239 255;
-  --wx-mine-text: 12 35 70;
-  --wx-other: 38 54 82;
-  --wx-other-text: 229 237 248;
+  /* 星云电子 — 近纯黑深空 + 电光青蓝 */
+  --ink-900: 7 9 18;
+  --ink-800: 16 22 42;
+  --ink-700: 22 30 56;
+  --ink-600: 33 44 78;
+  --ink-500: 51 66 108;
+
+  --royal-300: 125 211 252;
+  --royal-400: 56 189 248;
+  --royal-500: 14 165 233;
+  --royal-600: 2 132 199;
+
+  --jade-300: 94 234 212;
+  --jade-400: 45 212 191;
+  --jade-500: 20 184 166;
+  --jade-600: 13 148 136;
+
+  --gold-300: 253 224 71;
+  --gold-400: 250 204 21;
+  --gold-500: 234 179 8;
+
+  --text-strong: 255 255 255;
+  --text-primary: 226 232 240;
+  --text-secondary: 148 163 184;
+  --text-muted: 100 116 139;
+  --text-faint: 71 85 105;
+
+  --line: 51 66 99;
+  --surface-1: 16 22 42;
+  --surface-2: 22 30 56;
+
+  --accent: var(--royal-400);
+  --accent-deep: var(--royal-600);
+
+  --wx-mine: 14 165 233;
+  --wx-mine-text: 255 255 255;
+  --wx-other: 22 30 56;
+  --wx-other-text: 226 232 240;
 }
 
 [data-theme='inkwash'] {
   color-scheme: dark;
 
-  /* Bamboo Ink: green-tinted ink base with a clean jade focus */
-  --ink-900: 15 26 21;
-  --ink-800: 29 44 37;
-  --ink-700: 39 58 47;
-  --ink-600: 56 82 66;
-  --ink-500: 84 116 98;
-  --jade-300: 134 239 172;
-  --jade-400: 74 222 128;
-  --jade-500: 34 197 94;
-  --jade-600: 22 138 78;
-  --royal-300: 167 216 184;
-  --royal-400: 122 186 139;
-  --royal-500: 86 168 124;
-  --royal-600: 64 132 95;
-  --text-strong: 244 252 247;
-  --text-primary: 217 232 225;
-  --text-secondary: 182 207 196;
-  --text-muted: 142 168 156;
-  --text-faint: 111 132 121;
-  --line: 92 124 106;
-  --surface-1: 29 44 37;
-  --surface-2: 39 58 47;
-  --wx-mine: 214 242 224;
-  --wx-mine-text: 21 38 28;
-  --wx-other: 39 58 47;
-  --wx-other-text: 232 243 236;
+  /* 青瓷月白 — 墨玉底 + 鲜竹青 + 铜金点睛 */
+  --ink-900: 6 12 10;
+  --ink-800: 13 26 22;
+  --ink-700: 18 36 30;
+  --ink-600: 27 51 43;
+  --ink-500: 40 74 62;
+
+  --jade-300: 167 243 208;
+  --jade-400: 52 211 153;
+  --jade-500: 16 185 129;
+  --jade-600: 5 150 105;
+
+  --royal-300: 187 227 205;
+  --royal-400: 134 210 175;
+  --royal-500: 72 168 122;
+  --royal-600: 56 138 100;
+
+  --gold-300: 240 226 178;
+  --gold-400: 201 169 97;
+  --gold-500: 170 138 72;
+
+  --text-strong: 255 255 255;
+  --text-primary: 224 242 234;
+  --text-secondary: 150 179 166;
+  --text-muted: 105 133 120;
+  --text-faint: 74 98 87;
+
+  --line: 42 74 62;
+  --surface-1: 13 26 22;
+  --surface-2: 18 36 30;
+
+  --accent: var(--jade-400);
+  --accent-deep: var(--jade-600);
+
+  --wx-mine: 16 185 129;
+  --wx-mine-text: 255 255 255;
+  --wx-other: 18 36 30;
+  --wx-other-text: 224 242 234;
 }
 
 [data-theme='cnred'] {
   color-scheme: dark;
 
-  /* Crimson & Gold: warm dark lacquer, red action, gold support */
-  --ink-900: 26 17 19;
-  --ink-800: 44 28 31;
-  --ink-700: 58 37 40;
-  --ink-600: 82 52 56;
-  --ink-500: 117 74 78;
-  --jade-300: 240 208 122;
-  --jade-400: 216 178 74;
-  --jade-500: 178 140 46;
-  --jade-600: 144 113 42;
-  --royal-300: 238 170 170;
-  --royal-400: 224 110 110;
-  --royal-500: 220 66 69;
-  --royal-600: 185 49 52;
-  --text-strong: 255 246 244;
-  --text-primary: 241 217 212;
-  --text-secondary: 215 184 178;
-  --text-muted: 169 143 140;
-  --text-faint: 138 118 116;
-  --line: 128 88 90;
-  --surface-1: 44 28 31;
-  --surface-2: 58 37 40;
-  --wx-mine: 234 205 145;
-  --wx-mine-text: 61 29 12;
-  --wx-other: 58 37 40;
-  --wx-other-text: 244 230 227;
+  /* 朱雀鎏金 — 漆黑底 + 正红 + 鎏金 */
+  --ink-900: 14 6 8;
+  --ink-800: 30 13 16;
+  --ink-700: 44 19 23;
+  --ink-600: 64 28 33;
+  --ink-500: 92 40 47;
+
+  --royal-300: 255 145 145;
+  --royal-400: 248 113 113;
+  --royal-500: 239 68 68;
+  --royal-600: 220 38 38;
+
+  --jade-300: 253 224 133;
+  --jade-400: 250 204 21;
+  --jade-500: 234 179 8;
+  --jade-600: 202 138 4;
+
+  --gold-300: 253 224 133;
+  --gold-400: 250 204 21;
+  --gold-500: 234 179 8;
+
+  --text-strong: 255 252 250;
+  --text-primary: 245 226 222;
+  --text-secondary: 198 166 160;
+  --text-muted: 152 124 120;
+  --text-faint: 115 93 90;
+
+  --line: 92 43 48;
+  --surface-1: 30 13 16;
+  --surface-2: 44 19 23;
+
+  --accent: var(--royal-500);
+  --accent-deep: var(--royal-600);
+
+  --wx-mine: 220 38 38;
+  --wx-mine-text: 255 255 255;
+  --wx-other: 44 19 23;
+  --wx-other-text: 245 226 222;
 }
 
 [data-theme='daylight'] {
   color-scheme: light;
 
-  /* Fog Blue Paper: white cards on cool paper, blue interaction */
-  --ink-900: 240 244 249;
+  /* 晴空晨光 — 冷白纸面 + 高对比深蓝 */
+  --ink-900: 244 247 252;
   --ink-800: 255 255 255;
-  --ink-700: 247 250 253;
-  --ink-600: 232 238 244;
-  --ink-500: 210 220 232;
-  --jade-300: 4 120 87;
-  --jade-400: 16 185 129;
-  --jade-500: 5 150 105;
-  --jade-600: 4 120 87;
+  --ink-700: 248 250 253;
+  --ink-600: 237 242 248;
+  --ink-500: 214 224 236;
+
   --royal-300: 29 78 216;
-  --royal-400: 59 130 246;
-  --royal-500: 37 99 235;
-  --royal-600: 29 78 216;
-  --text-strong: 27 43 61;
-  --text-primary: 52 73 94;
-  --text-secondary: 90 109 130;
-  --text-muted: 116 132 152;
-  --text-faint: 152 167 184;
-  --line: 176 190 208;
+  --royal-400: 37 99 235;
+  --royal-500: 29 78 216;
+  --royal-600: 30 64 175;
+
+  --jade-300: 4 120 87;
+  --jade-400: 5 150 105;
+  --jade-500: 16 185 129;
+  --jade-600: 4 120 87;
+
+  --gold-300: 161 98 7;
+  --gold-400: 180 83 9;
+  --gold-500: 146 64 14;
+
+  --text-strong: 15 23 42;
+  --text-primary: 30 41 59;
+  --text-secondary: 71 85 105;
+  --text-muted: 100 116 139;
+  --text-faint: 130 143 158;
+
+  --line: 203 213 225;
   --surface-1: 255 255 255;
-  --surface-2: 247 250 253;
-  --wx-mine: 213 235 255;
-  --wx-mine-text: 12 35 70;
+  --surface-2: 248 250 253;
+
+  --accent: var(--royal-400);
+  --accent-deep: var(--royal-600);
+
+  --wx-mine: 29 78 216;
+  --wx-mine-text: 255 255 255;
   --wx-other: 255 255 255;
-  --wx-other-text: 35 42 56;
+  --wx-other-text: 30 41 59;
 }
 
 html,
@@ -134,56 +195,64 @@ body,
 
 body {
   margin: 0;
+  /* 更明确的双色聚光 + 一层柔和環境光，让底色有呼吸感 */
   background:
-    radial-gradient(1300px 640px at 10% -14%, rgb(var(--royal-500) / 0.10), transparent 58%),
-    radial-gradient(950px 520px at 94% 2%, rgb(var(--jade-500) / 0.07), transparent 56%),
+    radial-gradient(1100px 560px at 8% -12%, rgb(var(--royal-500) / 0.20), transparent 60%),
+    radial-gradient(900px 520px at 96% 4%, rgb(var(--jade-500) / 0.14), transparent 58%),
+    radial-gradient(1300px 900px at 50% 118%, rgb(var(--accent) / 0.06), transparent 62%),
     rgb(var(--ink-900));
   color: rgb(var(--text-primary));
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  transition: background 0.4s ease;
+  transition: background 0.45s ease;
 }
 
+/* ── 各皮肤的背景肌理 ─────────────────────────────────────────── */
+
+/* 星云：细网格 + 顶部消隐，科技感 */
 [data-theme='punk'] body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(rgb(var(--royal-500) / 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--royal-500) / 0.04) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(ellipse at 50% 0%, black 28%, transparent 72%);
+    linear-gradient(rgb(var(--royal-400) / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--royal-400) / 0.05) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(ellipse at 50% 0%, black 30%, transparent 74%);
 }
 
+/* 青瓷：两团水墨晕染 */
 [data-theme='inkwash'] body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(680px 780px at 8% 100%, rgb(var(--jade-500) / 0.07), transparent 60%),
-    radial-gradient(520px 660px at 96% 18%, rgb(var(--jade-500) / 0.06), transparent 55%);
+    radial-gradient(660px 760px at 6% 100%, rgb(var(--jade-500) / 0.13), transparent 60%),
+    radial-gradient(520px 660px at 96% 16%, rgb(var(--gold-400) / 0.08), transparent 55%);
 }
 
+/* 朱雀：暖侧光，营造漆器反光 */
 [data-theme='cnred'] body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(760px 520px at 18% 0%, rgb(var(--royal-500) / 0.08), transparent 62%),
-    radial-gradient(680px 480px at 94% 100%, rgb(var(--jade-500) / 0.07), transparent 55%);
+    radial-gradient(720px 500px at 16% 0%, rgb(var(--royal-500) / 0.16), transparent 62%),
+    radial-gradient(680px 470px at 94% 100%, rgb(var(--gold-400) / 0.10), transparent 56%);
 }
 
+/* 晴空：极淡的光晕，保持纸面干净 */
 [data-theme='daylight'] body::before {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(900px 500px at 8% -10%, rgb(var(--royal-500) / 0.06), transparent 60%),
-    radial-gradient(760px 480px at 96% 0%, rgb(var(--jade-500) / 0.04), transparent 55%);
+    radial-gradient(880px 480px at 6% -10%, rgb(var(--royal-400) / 0.07), transparent 60%),
+    radial-gradient(760px 460px at 96% 0%, rgb(var(--jade-500) / 0.05), transparent 55%);
 }
 
 ::-webkit-scrollbar {
@@ -191,8 +260,11 @@ body {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(var(--ink-500) / 0.82);
+  background: rgb(var(--ink-500) / 0.85);
   border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--accent) / 0.7);
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -202,65 +274,88 @@ body {
   .panel {
     @apply rounded-2xl backdrop-blur;
     border: 1px solid rgb(var(--line) / 0.55);
-    background: rgb(var(--surface-1) / 0.92);
-    box-shadow: 0 22px 60px -38px rgb(0 0 0 / 0.78);
+    background:
+      linear-gradient(180deg, rgb(var(--surface-1) / 0.96), rgb(var(--surface-1) / 0.88));
+    /* 顶部一道高光，让卡片从底色里「浮」出来 */
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.06),
+      0 22px 60px -38px rgb(0 0 0 / 0.8);
     color: rgb(var(--text-primary));
   }
+
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition;
   }
+
+  /* 主操作：渐变 + 光晕，这是「亮眼」的主要来源 */
   .btn-primary,
   .btn-royal {
     @apply btn text-white;
-    background: rgb(var(--royal-500));
-    box-shadow: 0 10px 24px -14px rgb(var(--royal-500) / 0.8);
+    background-image: linear-gradient(135deg, rgb(var(--accent)), rgb(var(--accent-deep)));
+    box-shadow: 0 8px 22px -10px rgb(var(--accent) / 0.75);
   }
   .btn-primary:hover,
   .btn-royal:hover {
-    background: rgb(var(--royal-600));
+    filter: brightness(1.12);
+    box-shadow: 0 10px 28px -8px rgb(var(--accent) / 0.9);
   }
+  .btn-primary:active,
+  .btn-royal:active {
+    filter: brightness(0.94);
+  }
+
   .btn-primary:disabled,
   .btn-royal:disabled,
   .btn-ghost:disabled,
   .btn-jade:disabled {
-    @apply cursor-not-allowed opacity-60;
+    @apply cursor-not-allowed opacity-55;
+    filter: none;
+    box-shadow: none;
   }
+
   .btn-ghost {
     @apply btn;
     border: 1px solid rgb(var(--line) / 0.62);
-    background: rgb(var(--surface-2) / 0.78);
+    background: rgb(var(--surface-2) / 0.7);
     color: rgb(var(--text-primary));
   }
   .btn-ghost:hover {
+    border-color: rgb(var(--accent) / 0.55);
     background: rgb(var(--surface-2));
     color: rgb(var(--text-strong));
   }
+
   .btn-jade {
     @apply btn text-white;
-    background: rgb(var(--jade-600));
+    background-image: linear-gradient(135deg, rgb(var(--jade-400)), rgb(var(--jade-600)));
+    box-shadow: 0 8px 22px -10px rgb(var(--jade-500) / 0.75);
   }
   .btn-jade:hover {
-    background: rgb(var(--jade-500));
+    filter: brightness(1.12);
   }
+
   .chip {
     @apply inline-flex items-center rounded-md px-2 py-0.5 text-[11px];
     border: 1px solid rgb(var(--line) / 0.48);
     background: rgb(var(--surface-2) / 0.72);
     color: rgb(var(--text-secondary));
   }
+
   .input {
     @apply w-full rounded-lg px-3 py-2 text-sm outline-none;
     border: 1px solid rgb(var(--line) / 0.58);
     background: rgb(var(--surface-2) / 0.78);
     color: rgb(var(--text-strong));
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   .input::placeholder {
     color: rgb(var(--text-faint));
   }
   .input:focus {
-    border-color: rgb(var(--royal-500) / 0.82);
-    box-shadow: 0 0 0 3px rgb(var(--royal-500) / 0.16);
+    border-color: rgb(var(--accent) / 0.9);
+    box-shadow: 0 0 0 3px rgb(var(--accent) / 0.18);
   }
+
   .label {
     @apply mb-1 block text-xs;
     color: rgb(var(--text-secondary));
@@ -283,8 +378,8 @@ body {
 
 .wx-chat {
   background:
-    radial-gradient(700px 400px at 82% 0%, rgb(var(--royal-500) / 0.06), transparent 55%),
-    rgb(var(--ink-900) / 0.48);
+    radial-gradient(700px 400px at 82% 0%, rgb(var(--accent) / 0.09), transparent 55%),
+    rgb(var(--ink-900) / 0.5);
 }
 
 .wx-bubble {
@@ -305,6 +400,7 @@ body {
 .wx-bubble-other {
   background: rgb(var(--wx-other));
   color: rgb(var(--wx-other-text));
+  box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.05);
 }
 .wx-bubble-other::after {
   left: -12px;
@@ -313,6 +409,7 @@ body {
 .wx-bubble-mine {
   background: rgb(var(--wx-mine));
   color: rgb(var(--wx-mine-text));
+  box-shadow: 0 6px 18px -10px rgb(var(--wx-mine) / 0.8);
 }
 .wx-bubble-mine::after {
   right: -12px;
@@ -338,156 +435,78 @@ body {
 }
 
 /*
- * Text hierarchy: 1.618 : 1.24 : 0.82 contrast steps.
- * Dark themes replace Tailwind's neutral slate with hue-consistent ink text.
+ * 文本层级重映射
+ * Tailwind 的 slate 语义不等价于本设计的层级，这里统一改写为：
+ *   slate-50/100 → strong（标题、强调）
+ *   slate-200    → primary（正文）
+ *   slate-300    → secondary（次要）
+ *   slate-400    → muted（辅助）
+ *   slate-500/600/700 → faint（弱化）
+ * 暗色与亮色共用同一套规则，因为 --text-* 已随主题反转。
  */
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-50,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-100 {
+.text-slate-50,
+.text-slate-100 {
   color: rgb(var(--text-strong));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-200 {
+.text-slate-200 {
   color: rgb(var(--text-primary));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-300 {
+.text-slate-300 {
   color: rgb(var(--text-secondary));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-400 {
+.text-slate-400 {
   color: rgb(var(--text-muted));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-500,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-600,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-slate-700 {
+.text-slate-500,
+.text-slate-600,
+.text-slate-700 {
   color: rgb(var(--text-faint));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .hover\:text-slate-200:hover,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .hover\:text-slate-300:hover {
+.hover\:text-slate-200:hover,
+.hover\:text-slate-300:hover {
   color: rgb(var(--text-strong));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .placeholder\:text-slate-500::placeholder {
+.placeholder\:text-slate-500::placeholder {
   color: rgb(var(--text-faint));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-royal-300 {
+
+/* 强调色统一走主题 accent */
+.text-royal-300,
+.hover\:text-royal-300:hover {
   color: rgb(var(--royal-300));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .hover\:text-royal-300:hover {
-  color: rgb(var(--royal-300));
+.text-royal-400 {
+  color: rgb(var(--royal-400));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-jade-300,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-jade-400 {
+.text-jade-300,
+.text-jade-400 {
   color: rgb(var(--jade-300));
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-rose-300,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-rose-400 {
+.text-rose-300,
+.text-rose-400 {
   color: #fb7185;
 }
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-amber-300,
-:is([data-theme='punk'], [data-theme='inkwash'], [data-theme='cnred']) .text-amber-400 {
-  color: #fbbf24;
+.text-amber-300,
+.text-amber-400 {
+  color: rgb(var(--gold-300));
 }
 
-/* Light theme text remains highly readable but never harsh. */
-[data-theme='daylight'] body {
-  color: #34495e;
+/* 半透明黑白 utility 随主题反转，避免出现「白框白底」 */
+:root .border-white\/5,
+:root .border-white\/10,
+:root .border-white\/15 {
+  border-color: rgb(var(--line) / 0.5);
 }
-[data-theme='daylight'] .text-slate-50,
-[data-theme='daylight'] .text-slate-100 {
-  color: #1b2b3d;
+:root .ring-white\/10 {
+  --tw-ring-color: rgb(var(--line) / 0.5);
 }
-[data-theme='daylight'] .text-slate-200,
-[data-theme='daylight'] .text-slate-300 {
-  color: #34495e;
+:root .bg-white\/5 {
+  background-color: rgb(var(--text-strong) / 0.06);
 }
-[data-theme='daylight'] .text-slate-400 {
-  color: #5a6d82;
+:root .bg-white\/10 {
+  background-color: rgb(var(--text-strong) / 0.11);
 }
-[data-theme='daylight'] .text-slate-500 {
-  color: #748498;
-}
-[data-theme='daylight'] .text-slate-600,
-[data-theme='daylight'] .text-slate-700 {
-  color: #8a99a9;
-}
-[data-theme='daylight'] .hover\:text-slate-200:hover,
-[data-theme='daylight'] .hover\:text-slate-300:hover {
-  color: #1b2b3d;
-}
-[data-theme='daylight'] .placeholder\:text-slate-500::placeholder {
-  color: #98a7b8;
-}
-[data-theme='daylight'] .text-royal-300,
-[data-theme='daylight'] .hover\:text-royal-300:hover {
-  color: #1668a8;
-}
-[data-theme='daylight'] .text-jade-300,
-[data-theme='daylight'] .text-jade-400 {
-  color: #047857;
-}
-[data-theme='daylight'] .text-rose-300,
-[data-theme='daylight'] .text-rose-400 {
-  color: #dc2626;
-}
-[data-theme='daylight'] .text-amber-300,
-[data-theme='daylight'] .text-amber-400 {
-  color: #b45309;
-}
-[data-theme='daylight'] .border-white\/5 {
-  border-color: #e4e7ed;
-}
-[data-theme='daylight'] .border-white\/10 {
-  border-color: #d6dbe3;
-}
-[data-theme='daylight'] .border-white\/15 {
-  border-color: #cfd5dd;
-}
-[data-theme='daylight'] .ring-white\/10 {
-  --tw-ring-color: #d6dbe3;
-}
-[data-theme='daylight'] .bg-white\/5 {
-  background-color: #eef1f5;
-}
-[data-theme='daylight'] .bg-white\/10 {
-  background-color: #e6eaef;
-}
-[data-theme='daylight'] .hover\:bg-white\/5:hover,
-[data-theme='daylight'] .hover\:bg-white\/10:hover {
-  background-color: #e6eaef;
-}
-[data-theme='daylight'] .wx-time,
-[data-theme='daylight'] .wx-notice {
-  background: #eef1f5;
-  color: #606873;
-}
-[data-theme='daylight'] .panel {
-  border-color: #dde3ec;
-  background: #ffffff;
-  box-shadow: 0 16px 38px -30px rgb(15 23 42 / 0.35);
-}
-[data-theme='daylight'] .btn-ghost {
-  border-color: #d8dee7;
-  background: #f4f7fa;
-  color: #34495e;
-}
-[data-theme='daylight'] .btn-ghost:hover {
-  background: #e9eef5;
-  color: #1b2b3d;
-}
-[data-theme='daylight'] .chip {
-  border-color: #dde3ea;
-  background: #f3f6f9;
-  color: #5a6d82;
-}
-[data-theme='daylight'] .input {
-  border-color: #d7dde6;
-  background: #ffffff;
-  color: #1b2b3d;
-}
-[data-theme='daylight'] .input::placeholder {
-  color: #98a7b8;
-}
-[data-theme='daylight'] .input:focus {
-  border-color: rgb(37 99 235 / 0.55);
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 0.1);
-}
-[data-theme='daylight'] .label {
-  color: #5a6d82;
+:root .hover\:bg-white\/5:hover,
+:root .hover\:bg-white\/10:hover {
+  background-color: rgb(var(--text-strong) / 0.11);
 }

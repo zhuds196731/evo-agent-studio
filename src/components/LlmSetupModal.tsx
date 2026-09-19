@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AppState, LlmConfig } from '../types';
-import { BUILTIN_PROVIDERS, routeModel } from '../engine/providers';
+import { BUILTIN_PROVIDERS, fetchProviderModels, modelsForProvider, routeModel } from '../engine/providers';
 import { saveState } from '../store/storage';
 
 interface Props {
@@ -18,7 +18,7 @@ export default function LlmSetupModal({
   onClose,
   onSaved,
   title = '配置在线大模型',
-  description = '问话需要联网大模型。请填写 API Key，保存后继续当前问话。',
+  description = '填写 API Key 后会自动从上游获取模型目录，保存后继续当前问话。',
 }: Props) {
   const keys = state.providerKeys ?? {};
   const [providerId, setProviderId] = useState(() => {
@@ -35,12 +35,52 @@ export default function LlmSetupModal({
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl || state.llm.baseUrl);
   const [modelId, setModelId] = useState(() => {
     if (state.llm.selectedProviderId === providerId && state.llm.model) return state.llm.model;
-    return provider.models[0]?.id ?? '';
+    return modelsForProvider(provider)[0]?.id ?? '';
   });
   const [temperature, setTemperature] = useState(state.llm.temperature);
   const [preferFree, setPreferFree] = useState(state.llm.preferFree);
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fetchStatus, setFetchStatus] = useState('');
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const fetchTimer = useRef<number>(0);
+
+  const providerModels = useMemo(() => modelsForProvider(provider), [provider, state.dynamicModels]);
+
+  useEffect(() => () => window.clearTimeout(fetchTimer.current), []);
+
+  const fetchOfficialModels = async (silent = false) => {
+    const key = apiKey.trim();
+    if (!key) {
+      if (!silent) setFetchError('请先填写 API Key');
+      return;
+    }
+    setFetchStatus('从上游获取模型中...');
+    setFetchError(null);
+    try {
+      const models = await fetchProviderModels({ ...provider, baseUrl: baseUrl.trim() }, key);
+      setFetchStatus(`已获取 ${models.length} 个上游模型`);
+      onUpdateState({
+        dynamicModels: {
+          ...(state.dynamicModels ?? {}),
+          [provider.id]: { models, fetchedAt: new Date().toISOString(), source: 'official' },
+        },
+      });
+      if (!models.some((item) => item.id === modelId)) setModelId(models[0]?.id ?? modelId);
+    } catch (fetchFailure) {
+      setFetchStatus('上游模型获取失败');
+      setFetchError((fetchFailure as Error).message || '请检查 API Key 和 Base URL');
+    }
+  };
+
+  const scheduleOfficialModels = (nextKey: string) => {
+    window.clearTimeout(fetchTimer.current);
+    const key = nextKey.trim();
+    if (key.length < 12 || providerModels.some((item) => item.dynamic)) return;
+    fetchTimer.current = window.setTimeout(() => {
+      void fetchOfficialModels(true);
+    }, 900);
+  };
 
   const selectProvider = (id: string) => {
     const nextProvider = BUILTIN_PROVIDERS.find((item) => item.id === id);
@@ -48,12 +88,14 @@ export default function LlmSetupModal({
     setProviderId(id);
     setApiKey(keys[id] ?? '');
     setBaseUrl(nextProvider.baseUrl || state.llm.baseUrl);
-    setModelId(nextProvider.models[0]?.id ?? '');
+    setModelId(modelsForProvider(nextProvider)[0]?.id ?? '');
+    setFetchStatus('');
+    setFetchError(null);
   };
 
   const save = () => {
     const trimmedKey = apiKey.trim();
-    const selectedModel = provider.models.find((item) => item.id === modelId);
+    const selectedModel = providerModels.find((item) => item.id === modelId);
     if (!trimmedKey) {
       setError('请填写 API Key');
       return;
@@ -98,9 +140,7 @@ export default function LlmSetupModal({
             <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{description}</p>
           </div>
-          <button className="btn-ghost px-2 py-1 text-xs" onClick={onClose}>
-            关闭
-          </button>
+          <button className="btn-ghost px-2 py-1 text-xs" onClick={onClose}>关闭</button>
         </div>
 
         <div className="space-y-3">
@@ -109,8 +149,7 @@ export default function LlmSetupModal({
             <select className="input text-xs" value={providerId} onChange={(event) => selectProvider(event.target.value)}>
               {BUILTIN_PROVIDERS.map((item) => (
                 <option key={item.id} value={item.id}>
-                  {item.name}
-                  {keys[item.id] ? ' · 已配置' : ''}
+                  {item.name}{keys[item.id] ? ' · 已配置' : ''}
                 </option>
               ))}
             </select>
@@ -118,7 +157,7 @@ export default function LlmSetupModal({
 
           <div>
             <label className="label flex items-center justify-between">
-              <span>API Key（仅保存本机）</span>
+              <span>API Key（仅保存在本机）</span>
               <a
                 href={provider.apiKeyUrl}
                 target="_blank"
@@ -133,22 +172,35 @@ export default function LlmSetupModal({
                 className="input flex-1 text-xs"
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
-                placeholder="填写 API Key"
-                onChange={(event) => setApiKey(event.target.value)}
+                placeholder="填写 API Key，可自动从上游获取模型"
+                onChange={(event) => {
+                  setApiKey(event.target.value);
+                  scheduleOfficialModels(event.target.value);
+                }}
+                onBlur={() => void fetchOfficialModels(true)}
               />
               <button className="btn-ghost shrink-0 px-2.5 text-xs" onClick={() => setShowKey((value) => !value)}>
                 {showKey ? '隐藏' : '显示'}
               </button>
+              <button className="btn-ghost shrink-0 px-2.5 text-xs" onClick={() => void fetchOfficialModels(false)}>
+                从上游获取
+              </button>
             </div>
+            {(fetchStatus || fetchError) && (
+              <div className={`mt-1.5 rounded px-2 py-1 text-[10px] ${fetchError ? 'bg-rose-500/10 text-rose-300' : 'bg-royal-500/10 text-royal-200'}`}>
+                {fetchError || fetchStatus}
+              </div>
+            )}
           </div>
 
           <div>
             <label className="label">模型</label>
             <select className="input text-xs" value={modelId} onChange={(event) => setModelId(event.target.value)}>
-              {provider.models.map((item) => (
+              {providerModels.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
                   {item.isFree && item.freeQuotaDaily > 0 ? ` · 免费额度 ${item.freeQuotaDaily}/日` : ''}
+                  {item.dynamic ? ' · 上游' : ''}
                 </option>
               ))}
             </select>
@@ -189,12 +241,8 @@ export default function LlmSetupModal({
           {error && <div className="rounded-lg bg-rose-500/10 px-3 py-2 text-[11px] text-rose-300">{error}</div>}
 
           <div className="flex items-center justify-end gap-2 pt-1">
-            <button className="btn-ghost text-xs" onClick={onClose}>
-              取消
-            </button>
-            <button className="btn-primary text-xs" onClick={save}>
-              保存并继续问话
-            </button>
+            <button className="btn-ghost text-xs" onClick={onClose}>取消</button>
+            <button className="btn-primary text-xs" onClick={save}>保存并继续问话</button>
           </div>
         </div>
       </div>

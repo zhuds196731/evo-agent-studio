@@ -16,7 +16,7 @@ interface LedDisplayProps {
   className?: string;
 }
 
-const COLOR_MAP = {
+export const LED_COLORS = {
   green: { text: '#39ff5b', glow: 'rgba(57,255,91,0.55)', dim: 'rgba(57,255,91,0.12)', bg: '#0a140a' },
   red: { text: '#ff4d5e', glow: 'rgba(255,77,94,0.55)', dim: 'rgba(255,77,94,0.12)', bg: '#140a0c' },
   amber: { text: '#ffc247', glow: 'rgba(255,194,71,0.55)', dim: 'rgba(255,194,71,0.12)', bg: '#141008' },
@@ -38,8 +38,8 @@ const SEGMENTS: Record<string, [number, number, number, number, number, number, 
 };
 
 /** 单个七段数码管字符 */
-function SevenSegDigit({ char, color, scale }: { char: string; color: keyof typeof COLOR_MAP; scale: number }) {
-  const c = COLOR_MAP[color];
+export function SevenSegDigit({ char, color, scale }: { char: string; color: keyof typeof LED_COLORS; scale: number }) {
+  const c = LED_COLORS[color];
   const w = 12 * scale;
   const h = 22 * scale;
   const t = 2.4 * scale; // 段厚
@@ -112,7 +112,7 @@ function SevenSegDigit({ char, color, scale }: { char: string; color: keyof type
 }
 
 export default function LedDisplay({ value, label, unit, prefix, color = 'green', size = 'md', className = '' }: LedDisplayProps) {
-  const c = COLOR_MAP[color];
+  const c = LED_COLORS[color];
   const scale = size === 'lg' ? 1.2 : size === 'md' ? 1 : 0.8;
   const chars = String(value ?? '0').split('');
 
@@ -164,7 +164,7 @@ export default function LedDisplay({ value, label, unit, prefix, color = 'green'
 }
 
 /** 跳动的 LED 时钟式实时表盘（可选装饰） */
-export function LedPulse({ color = 'green' }: { color?: keyof typeof COLOR_MAP }) {
+export function LedPulse({ color = 'green' }: { color?: keyof typeof LED_COLORS }) {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
     const t = window.setInterval(() => setNow(new Date()), 1000);

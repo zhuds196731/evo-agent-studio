@@ -11,8 +11,8 @@ import { generate, type LlmTurn } from './llm';
 import { memoryStore } from './memory';
 import { newMessage } from '../store/storage';
 import { routeModel } from './providers';
-import { invokePlugin } from './plugins';
-import { detectHistoryQuery, renderResearchBlock, researchHistory } from './historyResearch';
+import { compactContext, invokePlugin } from './plugins';
+import { renderResearchBlock, researchHistory } from './historyResearch';
 
 export const SCENE_LABEL: Record<Session['scene'], string> = {
   solo: '单人对话',
@@ -72,14 +72,60 @@ export function buildSageSystem(sage: Sage): string {
   ].join('\n');
 }
 
-function historyOf(session: Session, speakerId: string): LlmTurn[] {
-  return session.messages.slice(-10).map((m) => ({
-    role: m.speakerId === speakerId ? 'assistant' : m.role === 'user' ? 'user' : 'assistant',
-    content: `${m.speakerName}：${m.content}`,
-  })) as LlmTurn[];
+/** 先哲人格契约：把问题理解、思维框架、语气和引据方式一起锁进系统提示词 */
+export function buildSagePersonaSystem(sage: Sage, webMode: 'online' | 'offline' = 'offline'): string {
+  const today = new Date().toLocaleDateString('zh-CN');
+  const researchBoundary = webMode === 'online'
+    ? '当前为联网研究模式：你已获得一批公开资料。先用这些事实校准时代与事件，再用自己的思想去判断；不要逐条翻译资料，也不要伪造资料没有的细节。'
+    : '当前为离线研究模式：只依据你的既有学识与经典立场作答。涉及此刻才发生的事件时，不要编造数据；可从原理与历史经验出发判断，并说明尚需考察。';
+
+  return [
+    `你是${sage.era}的${sage.name}（${sage.alias || sage.name}），${sage.school}之宗匠。今天是${today}。`,
+    `精神内核：${sage.coreIdeas.join('；')}。`,
+    `必守思维路径：${sage.thinking.map((step, i) => `${i + 1}. ${step}`).join('；')}。`,
+    `语言气口：${sage.speakingStyle}。`,
+    `腹笥所藏：${sage.works.join('；')}。`,
+    `可择一二化用，而非堆砌：${sage.quotes.join('；')}。`,
+    `最擅长回应：${sage.goodAt.join('；')}。`,
+    researchBoundary,
+    '回答前先默识问题：认清提问者在为何事所困、隐含前提是什么、真正要决定的是什么；再按上述思维路径推演，不许套用通用助手腔。',
+    '第一句就直接入题，像其人开口。可举事、可反问、可比喻，但每个判断都要能落到提问者当下可做的一步；避免空泛赞语和面面俱到。',
+    '全文以中文为主，凡语词、典故须合乎其时代与身份；长度 180 至 450 字，若用户要求更长或追问细节，再延展。',
+    '严禁自称 AI、助手、模型、系统、程序，也不说“根据资料”“根据搜索结果”；你就是这位先哲本人在答问。',
+  ].join('\n');
+}
+
+/** 会话历史：短会话直接带上原文；超过阈值时交给常驻压缩器压成一段紧凑上下文 */
+async function historyOf(state: AppState, session: Session, speakerId: string): Promise<LlmTurn[]> {
+  const asTurn = (m: Session['messages'][number]): LlmTurn =>
+    ({
+      role: m.speakerId === speakerId ? 'assistant' : m.role === 'user' ? 'user' : 'assistant',
+      content: `${m.speakerName}：${m.content}`,
+    }) as LlmTurn;
+
+  const all = session.messages;
+  const RECENT = 8;
+  // 历史还短时压缩反而丢信息，直接给原文
+  if (all.length <= RECENT + 4) return all.slice(-10).map(asTurn);
+
+  const head = all.slice(0, Math.max(0, all.length - RECENT));
+  const compacted = await compactContext(
+    state.plugins ?? [],
+    head.map((m) => ({ speakerName: m.speakerName, content: m.content })),
+    { budgetChars: 1200 },
+  );
+  const tail = all.slice(-RECENT).map(asTurn);
+  if (!compacted.text) return all.slice(-10).map(asTurn);
+
+  // 压缩结果是"背景说明"，以 user 轮注入，避免被当成模型自己说过的话
+  return [
+    { role: 'user', content: `[历史压缩上下文]\n${compacted.text}` } as LlmTurn,
+    ...tail,
+  ];
 }
 
 async function speak(
+  state: AppState,
   session: Session,
   speakerId: string,
   speakerName: string,
@@ -88,7 +134,6 @@ async function speak(
   config: LlmConfig,
   temperature: number,
   side?: 'A' | 'B' | 'none',
-  providerKeys?: Record<string, string>,
 ): Promise<ChatMessage> {
   const recalled = memoryStore.recall({
     query: prompt,
@@ -103,11 +148,11 @@ async function speak(
     score: r.score,
     confidence: r.confidence,
   }));
-  const routedModel = routeModel(config, providerKeys ?? {});
+  const routedModel = routeModel(config, state.providerKeys ?? {});
   const result = await generate(
     {
       system,
-      history: historyOf(session, speakerId),
+      history: await historyOf(state, session, speakerId),
       prompt,
       temperature,
       sessionId: session.id,
@@ -116,7 +161,7 @@ async function speak(
       scene: session.scene,
       memory,
       routedModel,
-      providerKeys,
+      providerKeys: state.providerKeys,
     },
     config,
   );
@@ -180,13 +225,25 @@ async function autoInvokePlugins(
   const keywords = userInput.toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
   if (!keywords.length) return [];
 
+  const haystack = userInput.toLowerCase();
+  const scored = active
+    // 钉住的压缩器由上下文预处理单独调用，不在这里重复当工具注入（避免白烧 token）
+    .filter((plugin) => !plugin.pinned)
+    .map((plugin) => {
+      const hits = plugin.capabilities.reduce((sum, cap) => {
+        const c = cap.toLowerCase();
+        const phraseHit = c.length > 1 && haystack.includes(c);
+        const keywordHit = keywords.some((k) => c.includes(k) || k.includes(c));
+        return sum + (phraseHit || keywordHit ? 1 : 0);
+      }, 0);
+      // 常驻与高权重插件在命中相同时优先，保证同族里强的先上
+      return { plugin, hits, score: hits + Math.round((plugin.weight ?? 0) / 200) };
+    })
+    .filter((row) => row.hits > 0)
+    .sort((a, b) => b.score - a.score || (b.plugin.weight ?? 0) - (a.plugin.weight ?? 0));
+
   const invoked: PluginCallRecord[] = [];
-  for (const plugin of active.slice(0, 6)) {
-    const matched = plugin.capabilities.some((cap) => {
-      const c = cap.toLowerCase();
-      return keywords.some((k) => c.includes(k) || k.includes(c));
-    });
-    if (!matched) continue;
+  for (const { plugin } of scored) {
     const res = await invokePlugin(state.plugins ?? [], plugin.id, {
       task: userInput,
       text: userInput,
@@ -195,7 +252,7 @@ async function autoInvokePlugins(
     invoked.push({
       name: plugin.name,
       ok: res.ok,
-      output: (res.output ?? res.error ?? '').slice(0, 500),
+      output: (res.output ?? res.error ?? '').slice(0, 1800),
     });
     if (invoked.length >= 3) break;
   }
@@ -241,6 +298,7 @@ export async function runTurn(
       (extra ? `\n${extra}` : '') +
       pluginExtra;
     const msg = await speak(
+      state,
       session,
       persona.id,
       persona.name,
@@ -249,7 +307,6 @@ export async function runTurn(
       config,
       persona.temperature,
       sideOf(session, persona.id),
-      state.providerKeys,
     );
     result.push(msg);
     session.messages.push(msg);
@@ -342,23 +399,45 @@ export async function runTurn(
     case 'consult': {
       const sage = state.sages.find((s) => `sage-${s.id}` === ids[0] || s.id === ids[0]);
       if (sage) {
-        let system = buildSageSystem(sage);
+        const webMode = session.webMode === 'offline' ? 'offline' : 'online';
+        let system = buildSagePersonaSystem(sage, webMode);
         // 隐藏式研究管道：历史/人物点评类（含刁钻问题）后台静默检索网络资料，
         // 由大模型筛选融合后以先哲口吻回答；失败静默降级，用户无感
         try {
-          if (detectHistoryQuery(userInput)) {
+          if (webMode === 'online') {
             const refs = await researchHistory(userInput);
             const block = renderResearchBlock(refs);
             if (block) system += block;
+            const notice = newMessage(
+              session.id,
+              'system',
+              '系统提示',
+              refs.length
+                ? `联网模式：已获取 ${refs.length} 条公开资料，交由${sage.name}消化后作答。`
+                : `联网模式：暂未检索到相关公开资料，${sage.name}将按既有学识作答。`,
+              'system',
+            );
+            result.push(notice);
+            session.messages.push(notice);
+          } else {
+            const notice = newMessage(
+              session.id,
+              'system',
+              '系统提示',
+              `离线模式：${sage.name}仅依据既有学识与经典立场作答。`,
+              'system',
+            );
+            result.push(notice);
+            session.messages.push(notice);
           }
         } catch {
-          /* 静默：检索失败不影响回答 */
+          /* 联网失败时不阻断对话；资料不足时由先哲按既有学识回答 */
         }
         const routedModel = routeModel(config, state.providerKeys);
         const { text } = await generate(
           {
             system,
-            history: historyOf(session, sage.id),
+            history: await historyOf(state, session, sage.id),
             prompt: userInput,
             temperature: 0.8,
             routedModel,
