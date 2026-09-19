@@ -1,7 +1,7 @@
 {
   "name": "evo-agent-studio",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "description": "Self-Evolving Agent · 多模态智能体协同平台：岗位数字人、多场景对话、先哲思想咨询、知识库、记事本、投资分析",
   "main": "electron/main.cjs",

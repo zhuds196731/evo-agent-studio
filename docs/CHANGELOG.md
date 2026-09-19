@@ -4,6 +4,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.4] - 2026-09-19
+
+### Fixed
+
+- 修复语音播报在系统音色列表未加载完成时退回默认女声的问题。
+- 修复男声预置可能命中女声的匹配问题，确保 Windows 上男声优先使用 Kangkang / Yunxi / Yunyang。
+
 ## [1.0.3] - 2026-09-19
 
 ### Fixed

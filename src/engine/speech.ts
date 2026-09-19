@@ -2,10 +2,10 @@
  * 语音播报引擎（Web Speech API / speechSynthesis）
  *
  * 设计要点：
- * 1. 声音列表是异步加载的（Chrome / Electron 需要先触发 voiceschanged），因此统一走
- *    `ensureVoices()` 返回的 Promise，UI 不需要各自监听事件。
- * 2. 预置音色按"关键词 + 是否神经网络音色"打分匹配。Windows / Chrome 上带
- *    Online(Natural) 后缀的是神经网络合成音，接近真人发音，优先选用。
+ * 1. 声音列表是异步加载的（Chrome / Electron 需要先触发 voiceschanged），因此播报前
+ *    统一等待 `ensureVoices()`，避免启动后的首次提醒退回系统默认女声。
+ * 2. 预置音色按"真实性别 + 名称关键词 + 是否神经网络音色"打分匹配。
+ *    Windows / Chrome 上带 Online(Natural) 后缀的是神经网络合成音，接近真人发音。
  * 3. 浏览器要求首次发声必须由用户手势触发，所以提供"试听"按钮作为解锁入口。
  */
 
@@ -24,6 +24,18 @@ export interface VoicePreset {
   pitch: number;
   /** 额外语速系数，与用户设置的 rate 相乘 */
   rateScale: number;
+}
+
+/** 常见中文语音的真实性别。Web Speech API 不提供 gender 字段，只能按已知名称识别。 */
+const FEMALE_VOICE_PATTERN = /Xiaoxiao|晓晓|Huihui|慧慧|Yaoyao|瑶瑶|Xiaoyi|晓伊|Xiaohan|晓涵|Xiaomeng|晓梦|Xiaoxuan|晓萱|Tingting|婷婷|Xiaoshuang|小霜|Female/i;
+const MALE_VOICE_PATTERN = /Kangkang|康康|Yunxi|云希|Yunyang|云扬|Yunye|云野|Yunjian|云健|Yunhao|云皓|Yunfeng|云枫|Yunze|云泽|Yunqiang|云强|Male/i;
+
+function voiceGenderMatches(gender: VoiceGender, name: string): boolean {
+  if (gender === 'neutral') return true;
+  const knownFemale = FEMALE_VOICE_PATTERN.test(name);
+  const knownMale = MALE_VOICE_PATTERN.test(name);
+  if (knownFemale === knownMale) return !knownFemale; // 未知音色允许兜底，已知音色必须一致
+  return gender === 'girl' ? knownFemale : knownMale;
 }
 
 /** 预置音色：男女各若干，覆盖温婉 / 清甜 / 清朗 / 沉稳 等常见风格 */
@@ -60,7 +72,7 @@ export const VOICE_PRESETS: VoicePreset[] = [
     name: '男孩 · 清朗',
     gender: 'boy',
     desc: '干净利落，适合工作时段的操作提醒',
-    match: ['Yunxi', '云希', 'Kangkang', '康康', 'Xiaobei', 'Xiaoshuang'],
+    match: ['Kangkang', '康康', 'Yunxi', '云希', 'Yunyang', '云扬'],
     pitch: 0.96,
     rateScale: 1.0,
   },
@@ -69,7 +81,7 @@ export const VOICE_PRESETS: VoicePreset[] = [
     name: '男孩 · 沉稳',
     gender: 'boy',
     desc: '厚实稳重，适合节气养生与医理讲解',
-    match: ['Yunyang', '云扬', 'Kangkang', '康康', 'Yunxi'],
+    match: ['Yunyang', '云扬', 'Kangkang', '康康', 'Yunxi', '云希'],
     pitch: 0.86,
     rateScale: 0.9,
   },
@@ -144,7 +156,7 @@ export function chineseVoices(list: SpeechSynthesisVoice[]): SpeechSynthesisVoic
 
 /**
  * 为预置音色挑选最合适的系统声音。
- * 打分：语言匹配 > 名称关键词 > 神经网络音色加成 > 本地音色兜底。
+ * 打分：真实性别一致 > 语言匹配 > 名称关键词 > 神经网络音色加成 > 本地音色兜底。
  */
 export function pickVoice(
   preset: VoicePreset,
@@ -155,6 +167,8 @@ export function pickVoice(
     .map((voice) => {
       const name = voice.name ?? '';
       let score = 0;
+      score += voiceGenderMatches(preset.gender, name) ? 40 : -1000;
+
       if (/^zh[-_]?CN/i.test(voice.lang)) score += 60;
       else if (/^zh/i.test(voice.lang)) score += 40;
       else if (/Chinese|中文|普通话/i.test(name)) score += 30;
@@ -180,8 +194,13 @@ export interface SpeakOptions {
 
 /** 播报一段文本；同一时刻只保留一条播报，避免多条提醒叠在一起 */
 export function speak(text: string, opts: SpeakOptions): void {
+  void speakAsync(text, opts);
+}
+
+async function speakAsync(text: string, opts: SpeakOptions): Promise<void> {
   if (!speechSupported() || !text.trim()) return;
   const synth = window.speechSynthesis;
+  const voices = await ensureVoices();
   try {
     synth.cancel();
   } catch {
@@ -193,7 +212,7 @@ export function speak(text: string, opts: SpeakOptions): void {
   u.pitch = preset.pitch;
   u.rate = Math.min(2, Math.max(0.5, opts.rate * preset.rateScale));
   u.volume = Math.min(1, Math.max(0, opts.volume));
-  const voice = pickVoice(preset, voicesCache);
+  const voice = pickVoice(preset, voices);
   if (voice) {
     u.voice = voice;
     if (/^zh/i.test(voice.lang)) u.lang = voice.lang;

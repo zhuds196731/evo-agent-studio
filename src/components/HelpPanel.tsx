@@ -5,7 +5,7 @@ import { useState } from 'react';
  * 版本号与「关于」页保持一致，从 1.0 起算。
  */
 
-export const APP_VERSION = '1.0.3';
+export const APP_VERSION = '1.0.4';
 export const APP_RELEASE = '2026 年 9 月 19 日';
 
 interface Section {
