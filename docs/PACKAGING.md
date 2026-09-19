@@ -2,7 +2,7 @@
 
 ## 版本状态
 
-当前正式发布平台是 **Windows x64**。版本号以 `package.json` 为准，当前版本为 `1.0.0`。
+当前正式发布平台是 **Windows x64**。版本号以 `package.json` 为准，当前版本为 `1.0.1`。
 
 | 平台 | 状态 |
 | --- | --- |
@@ -130,8 +130,8 @@ npx cap open ios
 项目包含 `.github/workflows/release.yml`。推送 `v*` 标签后会构建 Windows x64 安装包和免安装包，并自动附加到 GitHub Release：
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 工作流会：
@@ -147,7 +147,7 @@ git push origin v1.0.0
 
 1. 打开仓库 Releases 页面。
 2. 点击 `Draft a new release`。
-3. 填写 Tag，例如 `v1.0.0`。
+3. 填写 Tag，例如 `v1.0.1`。
 4. 填写标题和说明。
 5. 上传 `release/*.exe`、`latest.yml` 和校验文件。
 6. 点击 `Publish release`。

@@ -4,6 +4,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.1] - 2026-09-19
+
+### Changed
+- 模型设置中每个供应商的目录按钮统一为「从上游获取」。
+- README、打包说明和平台路线图更新为 GitHub 正式发布版。
+- 发布版本号更新到 1.0.1。
+
 ## [1.0.0] - 2026-09-19
 
 首个正式版本基线。此前功能全部并入 1.0，版本号从此重新起算。
