@@ -339,6 +339,10 @@ function startImaServer() {
           json(await ima.finishWechatLogin());
           return;
         }
+        if (parsed.pathname === '/api/ima/wechat/clear') {
+          json(await ima.clearWechatConnection());
+          return;
+        }
         if (parsed.pathname === '/api/ima/call') {
           json(await ima.runOp(String(payload.op ?? ''), payload.args ?? {}));
           return;

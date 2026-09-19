@@ -17,6 +17,7 @@ import {
   imaTest,
   imaWechatFinish,
   imaWechatStart,
+  imaWechatClear,
   type ImaStatus,
 } from '../engine/imaBridge';
 
@@ -106,13 +107,13 @@ export default function ImaPanel({ onToast }: { onToast: (msg: string) => void }
     }
   };
 
-  /** 微信扫码登录：开受控浏览器 → 用户扫码 → 导入浏览器会话 */
+  /** 微信扫码登录：开受控浏览器 → 扫码 → 保存本机连接 */
   const startScan = async () => {
     setScanMsg('');
     try {
       const r = await imaWechatStart();
       setScanning(true);
-      setScanMsg(r.launched ? '已打开浏览器，请用微信扫描 ima.qq.com 页面上的二维码' : '浏览器已在运行，请扫码后点「导入」');
+      setScanMsg(r.launched ? '已打开浏览器，请用微信扫描 ima.qq.com 页面上的二维码；扫码后回来点「保存连接」' : '浏览器已在运行，请扫码后点「保存连接」');
       onToast('请在打开的浏览器里用微信扫码登录 ima.qq.com');
     } catch (e) {
       setError((e as Error).message);
@@ -124,16 +125,30 @@ export default function ImaPanel({ onToast }: { onToast: (msg: string) => void }
     try {
       const r = await imaWechatFinish();
       if (r.ok) {
-        setScanMsg(`导入成功 · 会话 Cookie ${r.cookies} 项，可用工具 ${r.tools} 个`);
-        onToast('微信扫码登录成功');
+        setScanMsg(`连接已保存 · 会话 Cookie ${r.cookies} 项${r.hasWebStorage ? ' + 网页会话' : ''}，可用工具 ${r.tools} 个`);
+        onToast('IMA 扫码连接已保存');
         await refreshStatus();
         setMcpTools([]);
         void loadMcpTools();
       } else {
-        setScanMsg(`已读到 ${r.cookies ?? 0} 项 Cookie，但连 MCP 失败：${r.error ?? '未知原因'}`);
+        setScanMsg(`连接已保存，但测试失败：${r.error ?? '未知原因'}`);
+        onToast('IMA 扫码连接已保存，但测试失败');
+        await refreshStatus();
       }
     } catch (e) {
-      setScanMsg(`导入失败：${(e as Error).message}`);
+      setScanMsg(`保存失败：${(e as Error).message}`);
+    }
+  };
+
+  const clearScan = async () => {
+    if (!window.confirm('清除已保存的 IMA 扫码连接？')) return;
+    try {
+      const s = await imaWechatClear();
+      setStatus(s);
+      setScanMsg('已清除扫码连接，下次需要重新扫码');
+      onToast('IMA 扫码连接已清除');
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
@@ -306,8 +321,19 @@ export default function ImaPanel({ onToast }: { onToast: (msg: string) => void }
           </div>
           {configured && (
             <span className="rounded-full border border-jade-500/40 bg-jade-500/10 px-2.5 py-1 text-[11px] text-jade-300">
-              ● 已配置 {status?.clientId ? `· ${status.clientId}` : ''}
+              ● 已保存连接 {status?.clientId ? `· ${status.clientId}` : ''}
             </span>
+          )}
+          {status?.savedAt && (
+            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300">
+              保存于 {new Date(status.savedAt).toLocaleString('zh-CN', { hour12: false })}
+            </span>
+          )}
+          {status?.lastTestOk === true && (
+            <span className="rounded-full border border-jade-500/40 bg-jade-500/10 px-2.5 py-1 text-[11px] text-jade-300">连接有效</span>
+          )}
+          {status?.lastTestOk === false && (
+            <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-300">上次验证失败</span>
           )}
         </div>
 
@@ -366,7 +392,7 @@ export default function ImaPanel({ onToast }: { onToast: (msg: string) => void }
               onClick={() => void startScan()}
               className="rounded-lg border border-white/10 px-2.5 py-1 text-[11px] text-slate-200 hover:bg-white/5"
             >
-              ① 打开扫码窗口
+              ① 打开 / 恢复登录窗口
             </button>
             <button
               type="button"
@@ -374,9 +400,21 @@ export default function ImaPanel({ onToast }: { onToast: (msg: string) => void }
               onClick={() => void finishScan()}
               className="rounded-lg bg-jade-500/80 px-2.5 py-1 text-[11px] text-white disabled:opacity-40"
             >
-              ② 我已扫码，导入
+              ② 我已扫码，保存连接
             </button>
-            {status?.hasCookie && <span className="text-[11px] text-jade-300">● 已导入浏览器会话</span>}
+            {status?.hasCookie && <span className="text-[11px] text-jade-300">● 已保存浏览器会话</span>}
+            {status?.hasWebStorage && <span className="text-[11px] text-jade-300">● 已保存网页会话</span>}
+            {status?.hasLoginProfile && <span className="text-[11px] text-slate-400">● 登录档案已启用</span>}
+            <button
+              type="button"
+              onClick={() => void clearScan()}
+              className="rounded-lg border border-white/10 px-2.5 py-1 text-[11px] text-rose-300 hover:bg-white/5"
+            >
+              清除扫码连接
+            </button>
+            <p className="w-full text-[11px] text-slate-500">
+              连接保存在本机用户目录的 IMA 登录档案中，不会上传；下次打开会自动读取。
+            </p>
             {scanMsg && <p className="w-full text-[11px] text-amber-300">{scanMsg}</p>}
           </div>
         )}

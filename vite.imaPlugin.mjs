@@ -61,6 +61,7 @@ export function imaBridgePlugin() {
     postHandler('/api/ima/test', () => ima.testConnection());
     postHandler('/api/ima/wechat/start', () => ima.startWechatLogin());
     postHandler('/api/ima/wechat/finish', () => ima.finishWechatLogin());
+    postHandler('/api/ima/wechat/clear', () => ima.clearWechatConnection());
     postHandler('/api/ima/call', (p) => ima.runOp(String(p.op ?? ''), p.args ?? {}));
     getHandler('/api/ima/mcp/tools', async () => {
       const result = await ima.mcpTools();

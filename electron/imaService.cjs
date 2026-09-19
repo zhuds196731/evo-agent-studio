@@ -18,6 +18,7 @@ const BASE = 'https://ima.qq.com';
 const MCP_URL = 'https://ima.qq.com/mcp';
 const AUTH_FILE = path.join(os.homedir(), '.evo-agent-studio', 'ima-auth.json');
 const SKILL_VERSION = '1.1.0';
+const PROFILE_DIR = path.join(os.homedir(), '.evo-agent-studio', 'ima-login-profile');
 
 let auth = null; // { mode: 'openapi'|'mcp', clientId, apiKey, token, savedAt }
 
@@ -59,7 +60,12 @@ function publicStatus() {
     clientId: st.clientId ? `${st.clientId.slice(0, 4)}****${st.clientId.slice(-2)}` : null,
     hasToken: Boolean(st.token),
     hasCookie: Boolean(st.cookie),
+    hasWebStorage: Boolean(st.webStorage && Object.keys(st.webStorage.local ?? {}).length),
+    hasLoginProfile: true,
     savedAt: st.savedAt ?? null,
+    lastTestAt: st.lastTestAt ?? null,
+    lastTestOk: st.lastTestOk ?? null,
+    lastTestError: st.lastTestError ?? null,
     base: BASE,
   };
 }
@@ -219,7 +225,7 @@ async function startWechatLogin() {
     }
     loginBrowser = null;
   }
-  const profile = path.join(os.tmpdir(), 'evo-ima-login');
+  const profile = PROFILE_DIR;
   // 注意两点，否则窗口起不来：
   // 1) 必须 --new-window，不然 Edge 会把地址交给已在运行的实例（调试端口永远连不上）
   // 2) 直接打开 /login，首页要先点「登录」才出二维码
@@ -239,10 +245,11 @@ async function startWechatLogin() {
   return { port: CDP_PORT, launched: true, cdpReady, url: LOGIN_URL };
 }
 
-async function cdpCookies() {
-  const listRes = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`, { signal: AbortSignal.timeout(8000) });
+async function cdpSessionData() {
+  const listRes = await fetch('http://127.0.0.1:' + CDP_PORT + '/json/list', { signal: AbortSignal.timeout(8000) });
   const pages = await listRes.json();
-  const target = pages.find((p) => p.type === 'page' && /ima\.qq\.com/.test(p.url ?? '')) ?? pages.find((p) => p.type === 'page');
+  const target = pages.find((p) => p.type === 'page' && /ima\.qq\.com/.test(p.url ?? ''))
+    ?? pages.find((p) => p.type === 'page');
   if (!target?.webSocketDebuggerUrl) throw new Error('浏览器调试端口未就绪，请稍等几秒再试');
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
@@ -269,34 +276,94 @@ async function cdpCookies() {
   try {
     await send(1, 'Network.enable');
     const result = await send(2, 'Network.getAllCookies');
-    return (result?.cookies ?? []).filter((c) => /ima\.qq\.com|qq\.com/.test(c.domain ?? ''));
+    const byKey = new Map();
+    for (const c of result?.cookies ?? []) {
+      if (/ima\.qq\.com|qq\.com/.test(c.domain ?? '')) byKey.set(c.name + '|' + c.domain + '|' + c.path, c);
+    }
+    // Storage.getCookies 可补上部分新版浏览器里 Network.getAllCookies 漏掉的隔离分区 Cookie。
+    try {
+      const extra = await send(3, 'Storage.getCookies');
+      for (const c of extra?.cookies ?? []) {
+        if (/ima\.qq\.com|qq\.com/.test(c.domain ?? '')) byKey.set(c.name + '|' + c.domain + '|' + c.path, c);
+      }
+    } catch { /* 老内核没有该命令时忽略 */ }
+    const expression = '(() => { const collect = (store) => { const out = {}; for (let i = 0; i < store.length; i += 1) { const key = store.key(i); if (key) out[key] = store.getItem(key); } return out; }; return JSON.stringify({ local: collect(localStorage), session: collect(sessionStorage), href: location.href }); })()';
+    let webStorage = { local: {}, session: {}, href: '' };
+    try {
+      const evaluated = await send(4, 'Runtime.evaluate', { expression, returnByValue: true });
+      const parsed = JSON.parse(evaluated?.result?.value ?? '{}');
+      webStorage = {
+        local: parsed.local ?? {},
+        session: parsed.session ?? {},
+        href: parsed.href ?? target.url ?? '',
+      };
+    } catch { /* 网页存储不是强制项，Cookie 仍可保存 */ }
+    return { cookies: [...byKey.values()], webStorage, pageUrl: target.url ?? '' };
   } finally {
     try { ws.close(); } catch { /* 已关闭 */ }
   }
 }
 
-/** 扫码完成后调用：取浏览器里的 IMA 会话并试连 MCP */
-async function finishWechatLogin() {
-  const cookies = await cdpCookies();
-  if (!cookies.length) throw new Error('没读到 IMA 会话 Cookie，请确认已在该浏览器里扫码登录 ima.qq.com');
-  const cookie = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+async function updateTestState(ok, error) {
   const st = await loadAuth();
-  st.mode = 'mcp';
-  st.cookie = cookie;
-  st.cookieNames = cookies.map((c) => c.name);
-  st.savedAt = Date.now();
-  mcpSessionId = null;
+  st.lastTestAt = Date.now();
+  st.lastTestOk = ok;
+  st.lastTestError = ok ? null : String(error ?? '').slice(0, 500);
   await saveAuth();
+  return publicStatus();
+}
+
+/** 扫码完成后调用：读取并持久保存浏览器会话，再试连 MCP */
+async function finishWechatLogin() {
   try {
-    const result = await mcpTools();
-    return { ok: true, cookies: cookies.length, tools: result?.tools?.length ?? 0 };
-  } catch (error) {
-    return { ok: false, cookies: cookies.length, error: error.message };
+    const session = await cdpSessionData();
+    if (!session.cookies.length) throw new Error('没读到 IMA 会话 Cookie，请确认已在该浏览器里扫码登录 ima.qq.com');
+    const cookie = session.cookies.map((c) => c.name + '=' + c.value).join('; ');
+    const st = await loadAuth();
+    st.mode = 'mcp';
+    st.cookie = cookie;
+    st.cookieNames = session.cookies.map((c) => c.name);
+    st.webStorage = session.webStorage;
+    st.savedFrom = session.pageUrl;
+    st.savedAt = Date.now();
+    st.lastTestOk = null;
+    st.lastTestAt = null;
+    st.lastTestError = null;
+    mcpSessionId = null;
+    await saveAuth();
+    try {
+      const result = await mcpTools();
+      await updateTestState(true, null);
+      return {
+        ok: true,
+        saved: true,
+        cookies: session.cookies.length,
+        hasWebStorage: Object.keys(session.webStorage.local ?? {}).length > 0,
+        tools: result?.tools?.length ?? 0,
+      };
+    } catch (error) {
+      await updateTestState(false, error.message);
+      return { ok: false, saved: true, cookies: session.cookies.length, hasWebStorage: Object.keys(session.webStorage.local ?? {}).length > 0, error: error.message };
+    }
   } finally {
-    // 成功失败都要收掉调试浏览器：它是 detached + unref 派生的，
-    // 不 kill 就会一直留在后台，还占着一个带调试端口的实例。
+    // 浏览器关闭后，登录档案仍在 ~/.evo-agent-studio/ima-login-profile。
     closeLoginBrowser();
   }
+}
+
+async function clearWechatConnection() {
+  const st = await loadAuth();
+  st.cookie = '';
+  st.cookieNames = [];
+  st.webStorage = null;
+  st.savedFrom = null;
+  st.lastTestOk = null;
+  st.lastTestAt = null;
+  st.lastTestError = null;
+  mcpSessionId = null;
+  await saveAuth();
+  closeLoginBrowser();
+  return publicStatus();
 }
 
 function closeLoginBrowser() {
@@ -367,13 +434,25 @@ async function runOp(op, args = {}) {
 async function testConnection() {
   const st = await loadAuth();
   if (st.mode === 'mcp') {
-    const result = await mcpTools();
-    return { ok: true, mode: 'mcp', tools: result?.tools?.length ?? 0 };
+    try {
+      const result = await mcpTools();
+      await updateTestState(true, null);
+      return { ok: true, mode: 'mcp', tools: result?.tools?.length ?? 0 };
+    } catch (error) {
+      await updateTestState(false, error.message);
+      throw error;
+    }
   }
   // 轻量只读调用：拿「可添加的知识库列表」
   const started = Date.now();
-  const data = await callApi('openapi/wiki/v1/get_addable_knowledge_base_list', { cursor: '', limit: 5 });
-  return { ok: true, mode: 'openapi', ms: Date.now() - started, sample: data };
+  try {
+    const data = await callApi('openapi/wiki/v1/get_addable_knowledge_base_list', { cursor: '', limit: 5 });
+    await updateTestState(true, null);
+    return { ok: true, mode: 'openapi', ms: Date.now() - started, sample: data };
+  } catch (error) {
+    await updateTestState(false, error.message);
+    throw error;
+  }
 }
 
 module.exports = {
@@ -385,6 +464,7 @@ module.exports = {
   mcpCall,
   startWechatLogin,
   finishWechatLogin,
+  clearWechatConnection,
   BASE,
   AUTH_FILE,
 };

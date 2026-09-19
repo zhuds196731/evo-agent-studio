@@ -9,7 +9,12 @@ export interface ImaStatus {
   clientId: string | null;
   hasToken: boolean;
   hasCookie?: boolean;
+  hasWebStorage?: boolean;
+  hasLoginProfile?: boolean;
   savedAt: number | null;
+  lastTestAt?: number | null;
+  lastTestOk?: boolean | null;
+  lastTestError?: string | null;
   base: string;
 }
 
@@ -90,7 +95,8 @@ export const imaTest = () => post<{ ok: boolean; mode: string; ms?: number; tool
 /** 微信扫码登录：开受控浏览器 → 扫码 → 导入会话 */
 export const imaWechatStart = () => post<{ port: number; launched: boolean }>('/api/ima/wechat/start', {}, 30000);
 export const imaWechatFinish = () =>
-  post<{ ok: boolean; cookies?: number; tools?: number; error?: string }>('/api/ima/wechat/finish', {}, 45000);
+  post<{ ok: boolean; saved?: boolean; cookies?: number; hasWebStorage?: boolean; tools?: number; error?: string }>('/api/ima/wechat/finish', {}, 45000);
+export const imaWechatClear = () => post<ImaStatus>('/api/ima/wechat/clear', {}, 15000);
 
 /** 通用操作：笔记 / 知识库 */
 export function imaCall<T = unknown>(op: string, args: Record<string, unknown> = {}): Promise<T> {
