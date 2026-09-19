@@ -4,6 +4,13 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [1.0.3] - 2026-09-19
+
+### Fixed
+
+- 发布包补充 Electron 自动更新元数据和 SHA256 校验清单。
+- 继续包含 v1.0.2 的桌面版公共图片路径修复。
+
 ## [1.0.2] - 2026-09-19
 
 ### Fixed

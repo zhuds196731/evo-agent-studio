@@ -2,7 +2,7 @@
 
 ## 版本状态
 
-当前正式发布平台是 **Windows x64**。版本号以 `package.json` 为准，当前版本为 `1.0.2`。
+当前正式发布平台是 **Windows x64**。版本号以 `package.json` 为准，当前版本为 `1.0.3`。
 
 | 平台 | 状态 |
 | --- | --- |
@@ -34,8 +34,8 @@ npm run desktop
 
 1. `package.json` 的 `version`。
 2. `docs/CHANGELOG.md`。
-3. GitHub Release Tag。
-4. Release 说明与附件。
+3. `docs/RELEASE_NOTES_<version>.md`。
+4. GitHub Release Tag。
 5. 应用内「关于」页版本信息。
 
 ## Windows 桌面打包
@@ -57,7 +57,8 @@ release/
 ├── SelfEvolvingAgent-<version>-setup-x64.exe
 ├── SelfEvolvingAgent-<version>-setup-x64.exe.blockmap
 ├── SelfEvolvingAgent-<version>-portable-x64.exe
-└── latest.yml
+├── latest.yml
+└── SHA256SUMS.txt
 ```
 
 ### 安装版使用步骤
@@ -127,11 +128,11 @@ npx cap open ios
 
 ## GitHub Actions 自动打包
 
-项目包含 `.github/workflows/release.yml`。推送 `v*` 标签后会构建 Windows x64 安装包和免安装包，并自动附加到 GitHub Release：
+项目包含 `.github/workflows/release.yml`。推送 `v*` 标签后会构建 Windows x64 安装包和免安装包，并自动创建草稿 Release：
 
 ```bash
-git tag v1.0.2
-git push origin v1.0.2
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
 工作流会：
@@ -140,16 +141,19 @@ git push origin v1.0.2
 2. 运行 `npm ci`。
 3. 运行类型检查和 Web 构建。
 4. 构建 Windows x64 安装包和免安装包。
-5. 上传构建产物到 GitHub Actions Artifact。
-6. 创建 GitHub Release 并附加 `.exe` 文件。
+5. 生成 `SHA256SUMS.txt`。
+6. 上传构建产物到 GitHub Actions Artifact。
+7. 创建草稿 GitHub Release，附加 `.exe`、`.blockmap`、`latest.yml` 和 `SHA256SUMS.txt`。
+
+草稿 Release 核对无误后，在 GitHub Releases 页面点击发布。
 
 ## 手动创建 GitHub Release
 
 1. 打开仓库 Releases 页面。
 2. 点击 `Draft a new release`。
-3. 填写 Tag，例如 `v1.0.2`。
+3. 填写 Tag，例如 `v1.0.3`。
 4. 填写标题和说明。
-5. 上传 `release/*.exe`、`latest.yml` 和校验文件。
+5. 上传 `release/*.exe`、`latest.yml`、`SHA256SUMS.txt` 和 `.blockmap`。
 6. 点击 `Publish release`。
 
 ## 发布检查清单
