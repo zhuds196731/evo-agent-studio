@@ -1,97 +1,17 @@
-import type { AppState, Persona, Position, Session, Plugin } from '../types';
+import type { AppState, Persona, Position, Session, Plugin, HealthSettings } from '../types';
 import { BUILTIN_POSITIONS } from '../data/positions';
 import { ALPHASAGE_POSITIONS, LEGACY_ALPHASAGE_POSITION_IDS } from '../data/alphasage';
 import { BUILTIN_SAGES } from '../data/sages';
 import { createDefaultTdxConfig, createTdxConfig, readSavedTdxConfig } from '../engine/tdxSettings';
 import { createSkillhubPlugins } from '../data/skillhub';
 import { createMediaCrawlerPlugin } from '../data/mediacrawler';
+import { createCoreTools } from '../data/coreTools';
+import { applyPluginCatalog, CATEGORY_KEYS } from '../data/pluginCatalog';
 import { clearDynamicModelRegistry, registerDynamicModelCatalog } from '../engine/providers';
+import { DEFAULT_HEALTH } from '../engine/healthAgent';
 
 // 存储键沿用旧名以保护用户已有数据，软件显示名已改为 Self‑Evolving Agent
 const STORAGE_KEY = 'evo-agent-studio/v1';
-
-/** 内置插件：提供基础工具能力 */
-const BUILTIN_PLUGINS: Plugin[] = [
-  {
-    id: 'text-summarizer',
-    name: '文本摘要工具',
-    version: 1,
-    status: 'ACTIVE',
-    description: '将长文本提取关键事实和结论，生成简洁摘要',
-    code: `const handler = async (input) => {
-  const text = typeof input === 'string' ? input : (input?.text || input?.task || JSON.stringify(input));
-  const sentences = text.split(/[。.!！?？\\n]/).map(s => s.trim()).filter(Boolean);
-  const keyPoints = sentences.filter(s => s.length > 15).slice(0, 5);
-  return '摘要：' + keyPoints.join('；');
-};
-return handler(input);`,
-    inputSchema: { text: 'string' },
-    capabilities: ['摘要', '总结', 'summarize', '文本处理'],
-    permissions: [],
-    limits: { timeoutMs: 3000, maxOutputBytes: 8192 },
-    tests: [
-      { input: { text: '这是一段测试文本。需要提取关键信息。最终生成摘要。' }, expected: '摘要' },
-    ],
-    builtin: true,
-    createdAt: '2025-01-01T00:00:00.000Z',
-    updatedAt: '2025-01-01T00:00:00.000Z',
-  },
-  {
-    id: 'keyword-extractor',
-    name: '关键词提取工具',
-    version: 1,
-    status: 'ACTIVE',
-    description: '从文本中提取核心关键词，用于能力图谱匹配',
-    code: `const handler = async (input) => {
-  const text = typeof input === 'string' ? input : (input?.text || input?.task || JSON.stringify(input));
-  const words = text.toLowerCase().match(/[\\u4e00-\\u9fa5]+|[a-z]+/g) || [];
-  const freq = {};
-  for (const w of words) { if (w.length > 1) freq[w] = (freq[w] || 0) + 1; }
-  const keywords = Object.entries(freq).sort((a,b) => b[1]-a[1]).slice(0, 8).map(([k]) => k);
-  return keywords.join('、');
-};
-return handler(input);`,
-    inputSchema: { text: 'string' },
-    capabilities: ['关键词', '提取', '分析', 'keyword'],
-    permissions: [],
-    limits: { timeoutMs: 3000, maxOutputBytes: 4096 },
-    tests: [
-      { input: { text: '人工智能技术正在快速发展，大模型是其中的关键方向。' }, expected: '关键词' },
-    ],
-    builtin: true,
-    createdAt: '2025-01-01T00:00:00.000Z',
-    updatedAt: '2025-01-01T00:00:00.000Z',
-  },
-  {
-    id: 'task-decomposer',
-    name: '任务分解工具',
-    version: 1,
-    status: 'ACTIVE',
-    description: '将复杂任务拆解为可执行的子步骤',
-    code: `const handler = async (input) => {
-  const task = typeof input === 'string' ? input : (input?.task || input?.text || JSON.stringify(input));
-  const steps = [
-    '1. 明确目标与约束条件',
-    '2. 拆解核心子任务',
-    '3. 确定执行顺序与依赖',
-    '4. 分配责任人',
-    '5. 设定验收标准'
-  ];
-  return '任务分解：' + task.slice(0, 80) + '\\n' + steps.join('\\n');
-};
-return handler(input);`,
-    inputSchema: { task: 'string' },
-    capabilities: ['任务分解', '规划', '拆解', 'decompose'],
-    permissions: [],
-    limits: { timeoutMs: 3000, maxOutputBytes: 4096 },
-    tests: [
-      { input: { task: '完成产品上线发布' }, expected: '任务分解' },
-    ],
-    builtin: true,
-    createdAt: '2025-01-01T00:00:00.000Z',
-    updatedAt: '2025-01-01T00:00:00.000Z',
-  },
-];
 
 /** 由预置岗位生成默认人物实例，用户可改名、换头像、调人格 */
 function instantiate(position: Position, index: number): Persona {
@@ -126,8 +46,12 @@ export function createInitialState(): AppState {
     activeSessionId: null,
     providerKeys: {},
     dynamicModels: {},
-    plugins: [...BUILTIN_PLUGINS, ...createSkillhubPlugins(), createMediaCrawlerPlugin()],
-    pluginCategories: ['特殊技能', 'SkillHub', '内置插件', '自定义'],
+    plugins: applyPluginCatalog([
+      ...createCoreTools(),
+      ...createSkillhubPlugins(),
+      createMediaCrawlerPlugin(),
+    ]),
+    pluginCategories: [...CATEGORY_KEYS],
     evolutionLogs: [],
     evolutionSuggestions: [],
     investmentRuns: [],
@@ -138,6 +62,23 @@ export function createInitialState(): AppState {
     })(),
     notepad: { maxUploadBytes: null },
     media: {},
+    health: mergeHealth(undefined),
+  };
+}
+
+/** 养生设置合并：以默认值为底，逐项覆盖，避免升级新增字段时读到 undefined */
+function mergeHealth(saved: Partial<HealthSettings> | undefined): HealthSettings {
+  const base = DEFAULT_HEALTH;
+  const careBase = base.care;
+  const savedCare: Partial<HealthSettings['care']> = saved?.care ?? {};
+  return {
+    ...base,
+    ...(saved ?? {}),
+    care: {
+      eye: { ...careBase.eye, ...(savedCare.eye ?? {}) },
+      water: { ...careBase.water, ...(savedCare.water ?? {}) },
+      sit: { ...careBase.sit, ...(savedCare.sit ?? {}) },
+    },
   };
 }
 
@@ -181,13 +122,20 @@ export function loadState(): AppState {
       // 先哲保留用户拖拽排序：以用户数据顺序为准，升级新增的内置先哲追加到末尾
       sages: mergeKeepOrder(base.sages, parsed.sages),
       personas,
-      sessions: parsed.sessions ?? [],
+      // 逐条补全数组字段：旧版本导出的会话可能没有 teams / messages，
+      // 直接透传会让 director 在 session.teams.find(...) 上抛 TypeError。
+      sessions: (parsed.sessions ?? []).map((s) => ({
+        ...s,
+        messages: Array.isArray(s.messages) ? s.messages : [],
+        teams: Array.isArray(s.teams) ? s.teams : [],
+      })),
       llm: { ...base.llm, ...(parsed.llm ?? {}) },
       providerKeys: parsed.providerKeys ?? {},
-      plugins: mergeById(base.plugins, parsed.plugins as Plugin[] | undefined),
+      // 升级时按目录归一化：淘汰弱者与重复品、套用准确命名与分类、压缩器钉到首位
+      plugins: applyPluginCatalog(mergeById(base.plugins, parsed.plugins as Plugin[] | undefined)),
       pluginCategories: (() => {
         const saved = parsed.pluginCategories === undefined ? base.pluginCategories : parsed.pluginCategories;
-        return [...new Set(['特殊技能', ...saved])];
+        return [...new Set([...CATEGORY_KEYS, ...saved])];
       })(),
       evolutionLogs: parsed.evolutionLogs ?? [],
       evolutionSuggestions: parsed.evolutionSuggestions ?? [],
@@ -196,8 +144,20 @@ export function loadState(): AppState {
       notepad: { ...base.notepad, ...(parsed.notepad ?? {}) },
       tdx: parsed.tdx ? { ...base.tdx, ...parsed.tdx } : base.tdx,
       media: parsed.media ?? {},
+      health: mergeHealth(parsed.health),
     };
-  } catch {
+  } catch (error) {
+    // 迁移链上任一处抛错就静默丢弃全部数据太粗暴：用户会莫名其妙丢掉所有会话、
+    // 笔记与插件。先把原始内容另存一份再退回初始状态，至少还有找回的可能。
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        localStorage.setItem(`${STORAGE_KEY}-corrupt-${Date.now()}`, raw);
+        console.error('[storage] 本地数据读取失败，已备份原始内容到 localStorage', error);
+      }
+    } catch {
+      /* 连备份都失败也不能阻断启动 */
+    }
     return createInitialState();
   }
 }

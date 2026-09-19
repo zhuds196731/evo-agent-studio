@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { AppState, Sage } from '../types';
 import Avatar from './Avatar';
 import BookReader from './BookReader';
+import ComboboxPicker from './ComboboxPicker';
+import SageChat from './SageChat';
 import { compressToAvatar } from '../utils/image';
 import {
   bookStore,
@@ -19,7 +21,7 @@ import {
 
 interface Props {
   state: AppState;
-  onUpdateState: (patch: Partial<AppState>) => void;
+  onUpdateState: (patch: Partial<AppState> | ((prev: AppState) => Partial<AppState>)) => void;
   onConsult: (sageId: string) => void;
   onToast: (msg: string) => void;
 }
@@ -44,11 +46,26 @@ const emptySage = (): Sage => ({
 export default function SageHall({ state, onUpdateState, onConsult, onToast }: Props) {
   const [activeId, setActiveId] = useState(state.sages[0]?.id ?? '');
   const [draft, setDraft] = useState<Sage | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
 
   const active = state.sages.find((s) => s.id === activeId) ?? state.sages[0];
   const avatarInputRef = useRef<HTMLInputElement>(null);
+
+  /** 下拉选项：姓名直接显示，别号 / 时代 / 学派 / 擅长都参与搜索 */
+  const pickerOptions = useMemo(
+    () =>
+      state.sages.map((s) => ({
+        id: s.id,
+        name: s.name,
+        // 学派单独作为副标题，不再重复放进 keywords 里占位
+        sub: s.era || undefined,
+        group: s.school || '其他',
+        keywords: [s.alias, s.era, s.school, ...s.goodAt, ...s.coreIdeas].filter(Boolean).join(' '),
+        emoji: s.emoji,
+        accent: s.accent,
+        avatarUrl: s.avatarUrl,
+      })),
+    [state.sages],
+  );
 
   const patchSageAvatar = (sageId: string, avatarUrl?: string) => {
     onUpdateState({
@@ -79,18 +96,6 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
     }
   };
 
-  /** 拖拽排序：把 dragId 的卡片移动到 overId 位置，持久化到 state.sages */
-  const reorder = (dragId: string, overId: string) => {
-    if (dragId === overId) return;
-    const list = [...state.sages];
-    const from = list.findIndex((s) => s.id === dragId);
-    const to = list.findIndex((s) => s.id === overId);
-    if (from < 0 || to < 0) return;
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    onUpdateState({ sages: list });
-  };
-
   const save = () => {
     if (!draft) return;
     if (!draft.name.trim()) {
@@ -119,112 +124,47 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
   };
 
   return (
-    <div className="grid h-full grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
-      <div className="panel overflow-y-auto p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-200">先哲堂 · 思想咨询</h2>
-            <p className="mt-1 text-[11px] text-slate-500">
-              按住卡片左上角 ⠿ 拖动即可调整位置，把喜欢的人排在前面；内置人物可任意修改或删除
-            </p>
-          </div>
-          <button className="btn-jade px-2 py-1 text-xs" onClick={() => setDraft(emptySage())}>
-            + 新建人物
-          </button>
-        </div>
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/* 人物选择收进下拉：不再占用整列，纵向空间全部留给对话 */}
+      <div className="panel flex flex-wrap items-center gap-2 px-3 py-2">
+        <span className="shrink-0 text-xs font-medium text-slate-300">先哲</span>
+        <ComboboxPicker
+          value={active?.id ?? ''}
+          options={pickerOptions}
+          onChange={setActiveId}
+          placeholder={state.sages.length ? '选择思想人物' : '暂无人物，请先新建'}
+          searchHint="按姓名 / 学派 / 擅长查找"
+        />
+        <button className="btn-jade shrink-0 px-2 py-1 text-xs" onClick={() => setDraft(emptySage())}>
+          + 新建人物
+        </button>
+        {active && (
+          <>
+            <button className="btn-ghost shrink-0 px-2 py-1 text-[11px]" onClick={() => setDraft({ ...active })}>
+              编辑人物
+            </button>
+            <button
+              className="btn-ghost shrink-0 px-2 py-1 text-[11px]"
+              onClick={() => onConsult(active.id)}
+              title="在「协同会话」中继续这同一段对话"
+            >
+              协同会话中打开
+            </button>
+          </>
+        )}
+        <span className="ml-auto shrink-0 text-[10px] text-slate-500">共 {state.sages.length} 位</span>
+      </div>
 
-        <div className="space-y-1">
-          {state.sages.map((s, idx) => {
-            const expanded = s.id === active?.id;
-            return (
-              <div
-                key={s.id}
-                draggable
-                onDragStart={(e) => {
-                  setDragId(s.id);
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setOverId(s.id);
-                }}
-                onDragLeave={() => setOverId((v) => (v === s.id ? null : v))}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragId) reorder(dragId, s.id);
-                  setDragId(null);
-                  setOverId(null);
-                }}
-                onDragEnd={() => {
-                  setDragId(null);
-                  setOverId(null);
-                }}
-                onClick={() => setActiveId(s.id)}
-                className={`cursor-pointer rounded-xl border transition ${
-                  expanded
-                    ? 'border-royal-500/50 bg-royal-500/10'
-                    : overId === s.id && dragId && dragId !== s.id
-                      ? 'border-jade-500/60 bg-jade-500/10'
-                      : 'border-white/5 bg-ink-700/40 hover:bg-white/5'
-                } ${dragId === s.id ? 'opacity-40' : ''}`}
-              >
-                {/* 折叠行：紧凑单行 */}
-                <div className="flex items-center gap-2 px-2.5 py-2">
-                  <span
-                    className="cursor-grab select-none text-xs leading-none text-slate-600 transition hover:text-slate-300 active:cursor-grabbing"
-                    title="拖动调整位置"
-                  >
-                    ⠿
-                  </span>
-                  <span className="w-4 text-center text-[10px] text-slate-600">{idx + 1}</span>
-                  <Avatar name={s.name} url={s.avatarUrl} emoji={s.emoji} accent={s.accent} size={30} />
-                  <div className="min-w-0 flex-1">
-                    <span className="truncate text-sm text-slate-100">{s.name}</span>
-                    <span className="ml-1.5 hidden text-[11px] text-slate-500 sm:inline">{s.school}</span>
-                  </div>
-                  <button
-                    className="btn-primary px-2.5 py-1 text-[11px]"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onConsult(s.id);
-                    }}
-                  >
-                    请教
-                  </button>
-                  <span className={`w-3 text-[10px] text-slate-500 transition ${expanded ? 'rotate-180' : ''}`}>▾</span>
-                </div>
-                {/* 展开区：核心思想与擅长领域速览 */}
-                {expanded && (
-                  <div className="space-y-1.5 border-t border-white/5 px-3 pb-2.5 pt-2">
-                    <div className="flex flex-wrap gap-1">
-                      {s.coreIdeas.slice(0, 5).map((c) => (
-                        <span key={c} className="chip">{c}</span>
-                      ))}
-                    </div>
-                    <div className="text-[11px] text-slate-500">
-                      擅长：{s.goodAt.join('、') || '—'}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        className="btn-ghost px-2 py-0.5 text-[11px]"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDraft({ ...s });
-                        }}
-                      >
-                        编辑人物
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {!state.sages.length && (
-            <div className="py-6 text-center text-xs text-slate-500">还没有人物，点击「+ 新建人物」创建</div>
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[1fr_320px]">
+        <div className="panel flex min-h-0 flex-col overflow-hidden">
+          {active ? (
+            <SageChat state={state} onUpdateState={onUpdateState} onToast={onToast} sage={active} />
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-slate-500">
+              还没有人物，点击「+ 新建人物」创建
+            </div>
           )}
         </div>
-      </div>
 
       <div className="panel overflow-y-auto p-4">
         {draft ? (
@@ -345,20 +285,16 @@ export default function SageHall({ state, onUpdateState, onConsult, onToast }: P
             </div>
             <Section title="擅长领域" items={active.goodAt} />
 
-            <div className="flex gap-2">
-              <button className="btn-primary flex-1" onClick={() => onConsult(active.id)}>
-                开始咨询
-              </button>
-              <button className="btn-ghost text-rose-300" onClick={() => removeSage(active)}>
-                删除
-              </button>
-            </div>
+            <button className="btn-ghost w-full text-xs text-rose-300" onClick={() => removeSage(active)}>
+              删除这位人物
+            </button>
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-slate-500">
             还没有人物，点击「新建人物」创建
           </div>
         )}
+        </div>
       </div>
     </div>
   );

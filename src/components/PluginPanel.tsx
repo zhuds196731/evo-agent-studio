@@ -7,6 +7,12 @@ import {
   quarantinePlugin,
   generatePluginTemplate,
 } from '../engine/plugins';
+import {
+  applyPluginCatalog,
+  CATEGORY_KEYS,
+  DEPRECATED_PLUGIN_IDS,
+  categoryDesc,
+} from '../data/pluginCatalog';
 
 interface Props {
   state: AppState;
@@ -15,6 +21,13 @@ interface Props {
 }
 
 const SPECIAL_CATEGORY = '特殊技能';
+
+/** 加载方式标签 */
+function loadLabel(plugin: Plugin): { text: string; className: string } {
+  if (plugin.pinned) return { text: '钉住 · 常驻首位', className: 'text-amber-300' };
+  if (plugin.loadMode === 'resident') return { text: '常驻', className: 'text-jade-300' };
+  return { text: '按需', className: 'text-slate-400' };
+}
 
 function normalizeCategories(values: unknown): string[] {
   const saved = Array.isArray(values) ? values.map(String).map((v) => v.trim()).filter(Boolean) : [];
@@ -57,6 +70,9 @@ function normalizeImportedPlugin(raw: unknown, index: number): Plugin {
     builtin: false,
     source: 'manual',
     category: value.category ? String(value.category).trim() : '自定义',
+    // 导入的第三方插件一律按需加载：常驻位只给经过评估的内置强插件
+    loadMode: value.loadMode === 'resident' ? 'resident' : 'ondemand',
+    weight: Number(value.weight) || 50,
     createdAt: now,
     updatedAt: now,
   };
@@ -75,8 +91,14 @@ function downloadPlugins(filename: string, plugins: Plugin[], pluginCategories?:
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.style.display = 'none';
+  // 挂到文档上再点击，并延后释放 URL，否则部分浏览器会把下载直接取消。
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 1000);
 }
 
 export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
@@ -88,7 +110,9 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
   const plugins = state.plugins ?? [];
 
   const stateCategories = normalizeCategories(state.pluginCategories);
+  // 目录按内置顺序展示，用户自建目录追加在后
   const visibleCategories = [...new Set([
+    ...CATEGORY_KEYS,
     ...stateCategories,
     ...plugins.map(pluginCategory),
   ])].filter(Boolean);
@@ -192,6 +216,27 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
     onToast(`插件 ${plugin.name} 已删除`);
   };
 
+  /** 一键整理：淘汰弱者与重复品、套用准确命名与分类、压缩器钉到首位 */
+  const handleTidy = () => {
+    const before = plugins.length;
+    const retired = plugins.filter((p) => DEPRECATED_PLUGIN_IDS[p.id]);
+    const next = applyPluginCatalog(plugins);
+    if (next.length === before && !retired.length) {
+      onToast('插件库已经是最新整理状态');
+      return;
+    }
+    onUpdateState({
+      plugins: next,
+      pluginCategories: [...new Set([...CATEGORY_KEYS, ...visibleCategories])],
+    });
+    const names = retired.map((p) => p.name).slice(0, 4).join('、');
+    onToast(
+      retired.length
+        ? `已整理：清除 ${retired.length} 个弱/重复插件（${names}${retired.length > 4 ? ' 等' : ''}），并重排加载顺序`
+        : '已重排插件库：常驻在前，强插件优先',
+    );
+  };
+
   const handleSave = (plugin: Plugin) => {
     if (plugins.some((p) => p.id === plugin.id)) {
       updatePlugin(plugin);
@@ -250,6 +295,7 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
   };
 
   const sourceLabel = (plugin: Plugin) => {
+    if (plugin.source === 'core') return '核心工具';
     if (plugin.source === 'skillhub') return 'SkillHub';
     if (plugin.source === 'manual') return '自定义';
     if (plugin.builtin) return '内置';
@@ -257,7 +303,8 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
   };
 
   const loadedCount = plugins.filter((p) => p.status === 'ACTIVE').length;
-  const skillhubCount = plugins.filter((p) => p.source === 'skillhub').length;
+  const residentCount = plugins.filter((p) => p.loadMode === 'resident' || p.pinned).length;
+  const staleCount = plugins.filter((p) => DEPRECATED_PLUGIN_IDS[p.id]).length;
 
   return (
     <div className="panel h-full overflow-y-auto p-4">
@@ -265,9 +312,15 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
         <h2 className="text-sm font-semibold text-slate-200">
           插件工具管理
           <span className="ml-2 text-[11px] font-normal text-jade-400">已加载 {loadedCount}/{plugins.length}</span>
-          <span className="ml-2 text-[11px] font-normal text-royal-300">SkillHub {skillhubCount}</span>
+          <span className="ml-2 text-[11px] font-normal text-amber-300">常驻 {residentCount}</span>
+          {staleCount > 0 && (
+            <span className="ml-2 text-[11px] font-normal text-rose-300">待清理 {staleCount}</span>
+          )}
         </h2>
         <div className="flex flex-wrap gap-1.5">
+          <button className="btn-primary text-xs" onClick={handleTidy}>
+            整理插件库
+          </button>
           <button
             className="btn-ghost text-xs"
             onClick={() => downloadPlugins(
@@ -298,6 +351,7 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
                   : 'border-white/5 bg-ink-700/50 text-slate-400 hover:text-slate-200'
               }`}
               onClick={() => setActiveCategory(category)}
+              title={categoryDesc(category)}
             >
               {category}
               <span className="ml-1 opacity-70">{categoryCount(category)}</span>
@@ -338,7 +392,11 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
       </div>
 
       <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-        ACTIVE 插件参与所有对话场景的能力匹配；移动目录只调整归属，不改变状态、代码、测试记录或调用能力。
+        <span className="text-amber-300">常驻</span>：随启动即加载，能力匹配时加权优先；首位的
+        <span className="text-amber-300"> 上下文压缩器 </span>
+        被钉住不可降级，每轮自动压缩会话历史来省 token。
+        <span className="text-slate-400"> 按需</span>：命中能力标签时才注入。
+        移动目录只调整归属，不改变状态、代码、测试记录或调用能力。
       </p>
 
       <input
@@ -376,6 +434,10 @@ export default function PluginPanel({ state, onUpdateState, onToast }: Props) {
                   <span className="text-sm font-medium text-slate-200">{plugin.name}</span>
                   <span className={`text-[10px] ${statusColor[plugin.status]}`}>● {statusLabel[plugin.status]}</span>
                   <span className="chip text-[10px] text-slate-400">{pluginCategory(plugin)}</span>
+                  <span className={`chip text-[10px] ${loadLabel(plugin).className}`}>
+                    {loadLabel(plugin).text}
+                    {plugin.weight ? ` · 权重 ${plugin.weight}` : ''}
+                  </span>
                   <span className="chip text-[10px] text-slate-400">{sourceLabel(plugin)}</span>
                 </div>
                 <div className="mt-0.5 line-clamp-2 text-[11px] text-slate-500">{plugin.description}</div>
@@ -481,6 +543,8 @@ function PluginEditor({
   );
   const [timeoutMs, setTimeoutMs] = useState(plugin?.limits.timeoutMs ?? 3000);
   const [maxOutputBytes, setMaxOutputBytes] = useState(plugin?.limits.maxOutputBytes ?? 65536);
+  const [loadMode, setLoadMode] = useState<'resident' | 'ondemand'>(plugin?.loadMode ?? 'ondemand');
+  const [weight, setWeight] = useState(plugin?.weight ?? 50);
 
   const handleSave = () => {
     const now = new Date().toISOString();
@@ -500,6 +564,9 @@ function PluginEditor({
       builtin: plugin?.builtin ?? false,
       source: plugin?.source ?? 'manual',
       category,
+      loadMode: plugin?.builtin ? (plugin?.loadMode ?? 'ondemand') : loadMode,
+      pinned: plugin?.pinned,
+      weight: plugin?.builtin ? (plugin?.weight ?? 50) : weight,
       createdAt: plugin?.createdAt ?? now,
       updatedAt: now,
     };
@@ -532,8 +599,42 @@ function PluginEditor({
           <label className="label">插件来源</label>
           <input
             className="input"
-            value={plugin?.source === 'skillhub' ? 'SkillHub' : plugin?.builtin ? '内置' : '自定义'}
+            value={
+              plugin?.source === 'core'
+                ? '核心工具'
+                : plugin?.source === 'skillhub'
+                  ? 'SkillHub'
+                  : plugin?.builtin
+                    ? '内置'
+                    : '自定义'
+            }
             disabled
+          />
+        </div>
+        <div>
+          <label className="label">加载方式</label>
+          <select
+            className="input"
+            value={loadMode}
+            onChange={(e) => setLoadMode(e.target.value as 'resident' | 'ondemand')}
+            disabled={!!plugin?.builtin}
+            title={plugin?.builtin ? '内置插件的加载方式由插件目录统一决定' : '常驻：随启动加载；按需：命中能力才注入'}
+          >
+            <option value="ondemand">按需</option>
+            <option value="resident">常驻</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">匹配权重</label>
+          <input
+            type="number"
+            min={0}
+            max={999}
+            className="input"
+            value={weight}
+            onChange={(e) => setWeight(Number(e.target.value))}
+            disabled={!!plugin?.builtin}
+            title="同族插件里数值大的优先命中"
           />
         </div>
         <div className="md:col-span-2">

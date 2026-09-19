@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * 语音输入：基于浏览器 Web Speech API（Chrome / Edge 原生支持，中文识别）。
@@ -210,6 +210,17 @@ export function useVoiceInput(options: {
     },
     [listening, start, stop],
   );
+
+  /**
+   * 卸载时必须停掉识别。
+   * 连续识别（continuous）不会随组件卸载而结束：麦克风会一直被占用，
+   * 回调还会打在已卸载的组件上。用 ref 持有最新的 stop，避免把它塞进依赖导致反复重启。
+   */
+  const stopRef = useRef(stop);
+  useEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
+  useEffect(() => () => stopRef.current(), []);
 
   return { supported, listening, start, stop, toggle };
 }

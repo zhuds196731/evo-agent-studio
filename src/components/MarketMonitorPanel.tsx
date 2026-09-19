@@ -61,9 +61,14 @@ function formatVolumeHands(value: number | null | undefined): string {
   return `${value.toFixed(0)}手`;
 }
 
+/**
+ * 涨跌配色：A 股习惯是涨红跌绿（与欧美相反）。
+ * 这里用 Tailwind 内置固定色而不是主题变量 jade / rose——
+ * jade-300 在部分主题下是黄色，拿来表示涨跌会失真。
+ */
 function trendClass(value: number | null | undefined): string {
   if (value === null || value === undefined || value === 0) return 'text-slate-300';
-  return value > 0 ? 'text-jade-300' : 'text-rose-300';
+  return value > 0 ? 'text-red-400' : 'text-emerald-400';
 }
 
 export default function MarketMonitorPanel({ defaultSecid, onPick }: Props) {
@@ -176,9 +181,9 @@ export default function MarketMonitorPanel({ defaultSecid, onPick }: Props) {
   const quoteTone = quote?.changePercent === null || quote?.changePercent === undefined
     ? 'text-slate-200'
     : quote.changePercent > 0
-      ? 'text-jade-300'
+      ? 'text-red-400'
       : quote.changePercent < 0
-        ? 'text-rose-300'
+        ? 'text-emerald-400'
         : 'text-slate-200';
 
   const totalPages = Math.max(1, Math.ceil(market.total / pageSize));
@@ -526,7 +531,8 @@ function KlineChart({ bars }: { bars: MarketKline[] }) {
           const high = bar.high ?? close;
           const low = bar.low ?? close;
           const up = close >= open;
-          const color = up ? '#34d399' : '#fb7185';
+          // 与 QuoteTable / TdxMarketBoard 保持同一套涨跌色（涨红跌绿）
+          const color = up ? '#f0473e' : '#22c55e';
           const centerX = left + index * step + step / 2;
           const bodyTop = priceY(Math.max(open, close));
           const bodyHeight = Math.max(1, Math.abs(priceY(open) - priceY(close)));

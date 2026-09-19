@@ -18,13 +18,17 @@ import { fetchAlphaSageDataset } from '../engine/alphasageData';
 import MarketMonitorPanel from './MarketMonitorPanel';
 import InvestmentAiPanel from './InvestmentAiPanel';
 import TdxConfigEditor from './TdxConfigEditor';
+import TdxMarketWorkspace from './TdxMarketWorkspace';
 import type { AlphaSageDataset, AlphaSageLayerKey } from '../engine/alphasageData';
 import { createDefaultTdxConfig } from '../engine/tdxSettings';
 import {
+  autoConnectTdx,
   fetchTdxDailyBars,
+  fetchTdxQuotes,
   parseTdxConfig,
   probeTdxConfig,
   readTdxConfigFile,
+  type TdxHost,
   type TdxParseResult,
   type TdxProbeResult,
 } from '../engine/tdxBridge';
@@ -36,6 +40,9 @@ interface Props {
 }
 
 type ResultTab = 'chain' | 'metrics' | 'audit' | 'ai';
+
+/** 右栏主视图：行情优先（全市场报价 / K 线 / 财务），分析结果为另一页，避免互相挤占 */
+type RightView = 'market' | 'analysis';
 
 const DOMAINS: { id: AlphaSageDomain; name: string; description: string }[] = [
   { id: 'data', name: '数据感知与清洁域', description: '采集、核查、留痕' },
@@ -70,10 +77,14 @@ const LAYER_WEIGHT: Record<AlphaSageMetric['layer'], number> = {
 
 const LAYER_ORDER = ['macro', 'industry', 'fundamental', 'technical', 'sentiment'] as const;
 
+/** 上次测速成功的最快通道，持久化以便下次打开面板自动登录 */
+const TDX_LAST_HOST_KEY = 'evo/tdx/last-fast-host';
+
 export default function InvestmentPanel({ state, onUpdateState, onToast }: Props) {
   const [draft, setDraft] = useState<AlphaSageInput>(() => createAlphaSageInput());
   const [activeRunId, setActiveRunId] = useState<string | null>(state.investmentRuns[state.investmentRuns.length - 1]?.id ?? null);
   const [resultTab, setResultTab] = useState<ResultTab>('chain');
+  const [rightView, setRightView] = useState<RightView>('market');
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [dataset, setDataset] = useState<AlphaSageDataset | null>(null);
@@ -82,9 +93,15 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
   const [tdxResults, setTdxResults] = useState<TdxProbeResult[]>([]);
   const [tdxBest, setTdxBest] = useState<TdxProbeResult | null>(null);
   const [tdxBusy, setTdxBusy] = useState(false);
+  const [tdxAutoBusy, setTdxAutoBusy] = useState(false);
   const [tdxMessage, setTdxMessage] = useState<string | null>(null);
   const [showTdxConfigEditor, setShowTdxConfigEditor] = useState(false);
+  const [tdxActiveHost, setTdxActiveHost] = useState<TdxHost | null>(null);
   const fetchRequestId = useRef(0);
+
+  /** 上次接通成功的最快通道，用于下次打开时静默自动登录 */
+  const [tdxAutoLogged, setTdxAutoLogged] = useState(false);
+  const autoLoginTried = useRef(false);
 
   const tdxRuntime = state.tdx;
   const tdxConfigText = tdxRuntime?.config ?? '';
@@ -115,6 +132,42 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
 
     return () => { cancelled = true; };
   }, [onUpdateState, tdxRuntime?.source, tdxRuntime?.config]);
+
+  /**
+   * 自动登录：若上次已测到最快通道，本次打开面板时静默重连，
+   * 失败也不打扰用户（只把状态复位，等待手动点击测速）。
+   */
+  useEffect(() => {
+    if (autoLoginTried.current) return;
+    autoLoginTried.current = true;
+    let host: TdxHost | null = null;
+    try {
+      const raw = localStorage.getItem(TDX_LAST_HOST_KEY);
+      if (raw) host = JSON.parse(raw) as TdxHost;
+    } catch {
+      host = null;
+    }
+    if (!host?.address) return;
+
+    // 先探活再交给右侧行情视图。顺序反过来的话，失效的主站会先以 tdx 源渲染一次，
+    // 弹「行情快照读取失败」之后才降级，白白报一次错。
+    const code = /(\d{6})/.exec(draft.target)?.[1] ?? '600519';
+    Promise.all([
+      fetchTdxQuotes(host, [code]).catch(() => null),
+      fetchTdxDailyBars(host, code, 5).catch(() => null),
+    ]).then(([quoteResult, barResult]) => {
+      const alive = Boolean(quoteResult?.quotes?.[0] || barResult?.bars?.length);
+      if (alive) {
+        setTdxActiveHost(host);
+        setTdxAutoLogged(true);
+        setTdxMessage(`已自动重连上次最快通道 ${host.name || host.address}:${host.port}`);
+      } else {
+        setTdxActiveHost(null);
+        setTdxAutoLogged(false);
+        localStorage.removeItem(TDX_LAST_HOST_KEY);
+      }
+    });
+  }, [draft.target]);
 
   const targetSecid = useMemo(() => {
     const code = /(\d{6})/.exec(draft.target)?.[1] ?? '600519';
@@ -191,6 +244,15 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
         code,
         120,
       );
+      const host: TdxHost = {
+        id: probe.best.id,
+        name: probe.best.name,
+        address: probe.best.address,
+        port: probe.best.port,
+        primary: probe.best.primary,
+      };
+      setTdxActiveHost(host);
+      setTdxAutoLogged(true);
       patchDraft({
         ohlcv: [
           'date,open,high,low,close,volume',
@@ -205,6 +267,65 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
       onToast(`通达信数据读取失败：${message}`);
     } finally {
       setTdxBusy(false);
+    }
+  };
+
+  /**
+   * 一键测速并接通最快通道：并发探测全部行情主站 → 按延迟排名 → 自动选中最快可用主站 →
+   * 立即拉取实时行情 + 日 K，并把日 K 转成 OHLCV 填进分析输入（等价于"测到最快通道即自动登录"）。
+   */
+  const connectFastestChannel = async () => {
+    if (tdxAutoBusy || tdxBusy) return;
+    const code = /(\d{6})/.exec(draft.target)?.[1] ?? '600519';
+    setTdxAutoBusy(true);
+    setTdxMessage(null);
+    try {
+      if (!tdxConfigText.trim()) throw new Error('请先选择或粘贴通达信配置文件');
+      const parsed = await parseTdxConfig(tdxConfigText);
+      setTdxParsed(parsed);
+
+      const result = await autoConnectTdx(tdxConfigText, code, 160, 12);
+      setTdxResults(result.results);
+      setTdxBest(result.best);
+      if (!result.ok || !result.best) {
+        throw new Error(result.error ?? '全部通道探测失败，请检查网络或行情主站配置');
+      }
+
+      const host: TdxHost = {
+        id: result.best.id,
+        name: result.best.name,
+        address: result.best.address,
+        port: result.best.port,
+        primary: result.best.primary,
+      };
+      setTdxActiveHost(host);
+      setTdxAutoLogged(true);
+      setRightView('market');
+      try {
+        localStorage.setItem(TDX_LAST_HOST_KEY, JSON.stringify(host));
+      } catch {
+        /* 忽略存储不可用的情况 */
+      }
+      if (result.bars?.length) {
+        patchDraft({
+          ohlcv: [
+            'date,open,high,low,close,volume',
+            ...result.bars.map((bar) => [bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume].join(',')),
+          ].join('\n'),
+        });
+      }
+      const okCount = result.results.filter((row) => row.ok).length;
+      setTdxMessage(
+        `已接通最快通道 ${host.name || host.address}:${host.port}（${result.best.latencyMs}ms）· ` +
+          `可用 ${okCount}/${result.results.length} · 实时 ${result.quotes?.length ?? 0} 条 · 日 K ${result.bars?.length ?? 0} 根`,
+      );
+      onToast(`最快通道已自动接通：${host.name || host.address} ${result.best.latencyMs}ms`);
+    } catch (error) {
+      const message = (error as Error).message || '未知错误';
+      setTdxMessage(message);
+      onToast(`测速连接失败：${message}`);
+    } finally {
+      setTdxAutoBusy(false);
     }
   };
 
@@ -414,7 +535,14 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
           </div>
 
           <details className="mt-4 rounded-xl border border-white/5 bg-ink-700/35 p-3" open={tdxOpen} onToggle={(event) => setTdxOpen((event.target as HTMLDetailsElement).open)}>
-            <summary className="cursor-pointer text-xs font-medium text-slate-300">通达信行情源（默认已配置）</summary>
+            <summary className="cursor-pointer text-xs font-medium text-slate-300">
+              通达信行情源（默认已配置）
+              {tdxAutoLogged && tdxActiveHost && (
+                <span className="ml-2 rounded bg-jade-500/15 px-1.5 py-0.5 text-[10px] text-jade-200">
+                  已接通 {tdxActiveHost.name || tdxActiveHost.address}:{tdxActiveHost.port}
+                </span>
+              )}
+            </summary>
             <div className="mt-3 space-y-3">
               <div className="rounded-lg border border-jade-500/15 bg-jade-500/10 px-2.5 py-2 text-[10px] leading-4 text-jade-200">
                 已按默认配置就绪：只解析行情/资讯主站并读取日 K。配置里的账号、保存密码、交易登录信息不会被读取或提交。
@@ -430,12 +558,19 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
                 </div>
                 <div className="mt-1">连接时会自动探测可用主站，不依赖 PrimaryHost 一定可用。</div>
               </div>
+              <button
+                className="btn-royal w-full text-xs"
+                onClick={() => void connectFastestChannel()}
+                disabled={tdxAutoBusy || tdxBusy}
+              >
+                {tdxAutoBusy ? '正在测速并接通…' : '⚡ 测速最快通道并自动连接'}
+              </button>
               <div className="flex gap-2">
                 <button className="btn-ghost text-xs" onClick={() => setShowTdxConfigEditor(true)}>
                   修改配置
                 </button>
-                <button className="btn-royal flex-1 text-xs" onClick={() => void readTdxSource()} disabled={tdxBusy}>
-                  {tdxBusy ? '连接中...' : '连接行情源'}
+                <button className="btn-ghost flex-1 text-xs" onClick={() => void readTdxSource()} disabled={tdxBusy || tdxAutoBusy}>
+                  {tdxBusy ? '连接中...' : '仅读日 K'}
                 </button>
               </div>
               {tdxMessage && <div className="text-[10px] leading-4 text-slate-400">{tdxMessage}</div>}
@@ -449,13 +584,15 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
               )}
               {tdxResults.length > 0 && (
                 <div className="max-h-40 space-y-1 overflow-y-auto">
-                  {tdxResults.map((result) => (
+                  {tdxResults.map((result, index) => (
                     <button
                       key={`${result.address}:${result.port}:${result.id}`}
                       className={`w-full rounded-md border px-2 py-1 text-left text-[10px] ${tdxBest?.address === result.address && tdxBest?.port === result.port ? 'border-jade-500/30 bg-jade-500/10 text-jade-200' : 'border-white/5 bg-ink-800/50 text-slate-400 hover:border-white/10'}`}
                       title={result.error || `${result.sampleDate} close=${result.sampleClose}`}
                     >
-                      <span className="truncate">{result.name || result.address}</span>
+                      <span className="truncate">
+                        {result.ok ? `#${index + 1} ` : '✕ '}{result.name || result.address}
+                      </span>
                       <span className="ml-2 text-slate-500">:{result.port} · {result.ok ? `${result.latencyMs}ms` : '失败'}</span>
                     </button>
                   ))}
@@ -463,6 +600,10 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
               )}
             </div>
           </details>
+
+          <div className="mt-3 rounded-lg border border-white/5 bg-ink-700/35 px-2.5 py-2 text-[10px] leading-4 text-slate-500">
+            实时报价表、K 线与财务联动已移到右侧「通达信行情」视图，这里不再重复展示。
+          </div>
 
           <InvestmentAiPanel
             key={run?.id ?? 'draft'}
@@ -492,46 +633,77 @@ export default function InvestmentPanel({ state, onUpdateState, onToast }: Props
       <section className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-4">
         <DecisionCard run={run} layerScores={layerScores} />
 
-        {run ? (
-          <div className="panel flex min-h-0 flex-col overflow-hidden">
-            <header className="flex items-center gap-1 border-b border-white/5 p-3">
-              {(
-                [
-                  ['chain', '17 智能体链路'],
-                  ['metrics', '指标明细'],
-                  ['audit', '审计追踪'],
-                  ['ai', 'AI 问话'],
-                ] as [ResultTab, string][]
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setResultTab(id)}
-                  className={`rounded-lg px-3 py-1.5 text-xs transition ${
-                    resultTab === id
-                      ? 'bg-white/10 text-slate-100 ring-1 ring-white/10'
-                      : 'text-slate-400 hover:bg-white/5'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </header>
+        <div className="panel flex min-h-0 flex-col overflow-hidden">
+          <header className="flex items-center gap-1 border-b border-white/5 p-3">
+            {(
+              [
+                ['market', '通达信行情'],
+                ['analysis', '分析结果'],
+              ] as [RightView, string][]
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setRightView(id)}
+                className={`rounded-lg px-3 py-1.5 text-xs transition ${
+                  rightView === id
+                    ? 'bg-white/10 text-slate-100 ring-1 ring-white/10'
+                    : 'text-slate-400 hover:bg-white/5'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            {rightView === 'analysis' && run && (
+              <span className="ml-2 h-4 w-px bg-white/10" />
+            )}
+            {rightView === 'analysis' && run && (
+              <>
+                {(
+                  [
+                    ['chain', '17 智能体链路'],
+                    ['metrics', '指标明细'],
+                    ['audit', '审计追踪'],
+                    ['ai', 'AI 问话'],
+                  ] as [ResultTab, string][]
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setResultTab(id)}
+                    className={`rounded-lg px-3 py-1.5 text-xs transition ${
+                      resultTab === id
+                        ? 'bg-white/10 text-slate-100 ring-1 ring-white/10'
+                        : 'text-slate-400 hover:bg-white/5'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </>
+            )}
+          </header>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {resultTab === 'chain' && <AgentChain run={run} positions={state.positions} />}
-              {resultTab === 'metrics' && <MetricsTable metrics={run.metrics} />}
-              {resultTab === 'audit' && <AuditTrail audit={run.audit} />}
-              {resultTab === 'ai' && (
-                <InvestmentAiPanel key={run.id} run={run} state={state} onUpdateState={onUpdateState} onToast={onToast} />
-              )}
-            </div>
+          <div className={`min-h-0 flex-1 ${rightView === 'market' ? 'overflow-hidden' : 'overflow-y-auto'} p-0`}>
+            {rightView === 'market' ? (
+              <TdxMarketWorkspace host={tdxActiveHost} onToast={onToast} />
+            ) : run ? (
+              <div className="p-4">
+                {resultTab === 'chain' && <AgentChain run={run} positions={state.positions} />}
+                {resultTab === 'metrics' && <MetricsTable metrics={run.metrics} />}
+                {resultTab === 'audit' && <AuditTrail audit={run.audit} />}
+                {resultTab === 'ai' && (
+                  <InvestmentAiPanel key={run.id} run={run} state={state} onUpdateState={onUpdateState} onToast={onToast} />
+                )}
+              </div>
+            ) : (
+              <div className="p-4">
+                <MarketMonitorPanel
+                  defaultSecid={targetSecid}
+                  onPick={(code, name) => patchDraft({ target: name ? `${name}（${code}）` : code })}
+                />
+              </div>
+            )}
           </div>
-        ) : (
-          <MarketMonitorPanel
-            defaultSecid={targetSecid}
-            onPick={(code, name) => patchDraft({ target: name ? `${name}（${code}）` : code })}
-          />
-        )}
+        </div>
 
         <div className="panel shrink-0 overflow-hidden">
           <header className="flex items-center justify-between border-b border-white/5 px-4 py-3">

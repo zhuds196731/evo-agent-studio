@@ -11,7 +11,7 @@ import { generate, type LlmTurn } from './llm';
 import { memoryStore } from './memory';
 import { newMessage } from '../store/storage';
 import { routeModel } from './providers';
-import { invokePlugin } from './plugins';
+import { compactContext, invokePlugin } from './plugins';
 import { renderResearchBlock, researchHistory } from './historyResearch';
 
 export const SCENE_LABEL: Record<Session['scene'], string> = {
@@ -95,14 +95,37 @@ export function buildSagePersonaSystem(sage: Sage, webMode: 'online' | 'offline'
   ].join('\n');
 }
 
-function historyOf(session: Session, speakerId: string): LlmTurn[] {
-  return session.messages.slice(-10).map((m) => ({
-    role: m.speakerId === speakerId ? 'assistant' : m.role === 'user' ? 'user' : 'assistant',
-    content: `${m.speakerName}：${m.content}`,
-  })) as LlmTurn[];
+/** 会话历史：短会话直接带上原文；超过阈值时交给常驻压缩器压成一段紧凑上下文 */
+async function historyOf(state: AppState, session: Session, speakerId: string): Promise<LlmTurn[]> {
+  const asTurn = (m: Session['messages'][number]): LlmTurn =>
+    ({
+      role: m.speakerId === speakerId ? 'assistant' : m.role === 'user' ? 'user' : 'assistant',
+      content: `${m.speakerName}：${m.content}`,
+    }) as LlmTurn;
+
+  const all = session.messages;
+  const RECENT = 8;
+  // 历史还短时压缩反而丢信息，直接给原文
+  if (all.length <= RECENT + 4) return all.slice(-10).map(asTurn);
+
+  const head = all.slice(0, Math.max(0, all.length - RECENT));
+  const compacted = await compactContext(
+    state.plugins ?? [],
+    head.map((m) => ({ speakerName: m.speakerName, content: m.content })),
+    { budgetChars: 1200 },
+  );
+  const tail = all.slice(-RECENT).map(asTurn);
+  if (!compacted.text) return all.slice(-10).map(asTurn);
+
+  // 压缩结果是"背景说明"，以 user 轮注入，避免被当成模型自己说过的话
+  return [
+    { role: 'user', content: `[历史压缩上下文]\n${compacted.text}` } as LlmTurn,
+    ...tail,
+  ];
 }
 
 async function speak(
+  state: AppState,
   session: Session,
   speakerId: string,
   speakerName: string,
@@ -111,7 +134,6 @@ async function speak(
   config: LlmConfig,
   temperature: number,
   side?: 'A' | 'B' | 'none',
-  providerKeys?: Record<string, string>,
 ): Promise<ChatMessage> {
   const recalled = memoryStore.recall({
     query: prompt,
@@ -126,11 +148,11 @@ async function speak(
     score: r.score,
     confidence: r.confidence,
   }));
-  const routedModel = routeModel(config, providerKeys ?? {});
+  const routedModel = routeModel(config, state.providerKeys ?? {});
   const result = await generate(
     {
       system,
-      history: historyOf(session, speakerId),
+      history: await historyOf(state, session, speakerId),
       prompt,
       temperature,
       sessionId: session.id,
@@ -139,7 +161,7 @@ async function speak(
       scene: session.scene,
       memory,
       routedModel,
-      providerKeys,
+      providerKeys: state.providerKeys,
     },
     config,
   );
@@ -205,17 +227,20 @@ async function autoInvokePlugins(
 
   const haystack = userInput.toLowerCase();
   const scored = active
+    // 钉住的压缩器由上下文预处理单独调用，不在这里重复当工具注入（避免白烧 token）
+    .filter((plugin) => !plugin.pinned)
     .map((plugin) => {
-      const score = plugin.capabilities.reduce((sum, cap) => {
+      const hits = plugin.capabilities.reduce((sum, cap) => {
         const c = cap.toLowerCase();
         const phraseHit = c.length > 1 && haystack.includes(c);
         const keywordHit = keywords.some((k) => c.includes(k) || k.includes(c));
         return sum + (phraseHit || keywordHit ? 1 : 0);
       }, 0);
-      return { plugin, score };
+      // 常驻与高权重插件在命中相同时优先，保证同族里强的先上
+      return { plugin, hits, score: hits + Math.round((plugin.weight ?? 0) / 200) };
     })
-    .filter((row) => row.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .filter((row) => row.hits > 0)
+    .sort((a, b) => b.score - a.score || (b.plugin.weight ?? 0) - (a.plugin.weight ?? 0));
 
   const invoked: PluginCallRecord[] = [];
   for (const { plugin } of scored) {
@@ -273,6 +298,7 @@ export async function runTurn(
       (extra ? `\n${extra}` : '') +
       pluginExtra;
     const msg = await speak(
+      state,
       session,
       persona.id,
       persona.name,
@@ -281,7 +307,6 @@ export async function runTurn(
       config,
       persona.temperature,
       sideOf(session, persona.id),
-      state.providerKeys,
     );
     result.push(msg);
     session.messages.push(msg);
@@ -412,7 +437,7 @@ export async function runTurn(
         const { text } = await generate(
           {
             system,
-            history: historyOf(session, sage.id),
+            history: await historyOf(state, session, sage.id),
             prompt: userInput,
             temperature: 0.8,
             routedModel,

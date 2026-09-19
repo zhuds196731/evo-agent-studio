@@ -29,7 +29,7 @@ import { formatBytes } from '../engine/knowledge';
 
 interface Props {
   state: AppState;
-  onUpdateState: (patch: Partial<AppState>) => void;
+  onUpdateState: (patch: Partial<AppState> | ((prev: AppState) => Partial<AppState>)) => void;
   onToast: (msg: string) => void;
   initialScene?: SceneType;
   initialSageId?: string;
@@ -503,10 +503,12 @@ export default function SessionRoom({ state, onUpdateState, onToast, initialScen
     setBusy(true);
     try {
       await runTurn(runState, session, promptText || '\u8bf7\u9605\u8bfb\u5e76\u5206\u6790\u4e0a\u4f20\u7684\u9644\u4ef6\u3002');
-      onUpdateState({
-        sessions: runState.sessions.map((s) => (s.id === session.id ? { ...session } : s)),
+      // 用函数式更新而不是闭包里的 runState.sessions：一轮生成常耗时数十秒，
+      // 期间用户可能删掉或新建了别的会话，直接回写旧数组会把那些改动整批抹掉。
+      onUpdateState((prev) => ({
+        sessions: prev.sessions.map((s) => (s.id === session.id ? { ...session } : s)),
         activeSessionId: session.id,
-      });
+      }));
     } catch (e) {
       console.error('[session] \u672c\u8f6e\u751f\u6210\u5f02\u5e38\uff1a', e);
       onToast(`\u672c\u8f6e\u751f\u6210\u5931\u8d25\uff1a${(e as Error)?.message ?? '\u8bf7\u91cd\u8bd5'}`);
